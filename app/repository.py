@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 import logging
 from datetime import datetime
 
@@ -169,3 +170,62 @@ async def cleanup_old_data(days: int = 30):
     )
     await db.commit()
     logger.info("Cleaned up data older than %d days", days)
+
+
+# ---------- Subscription Persistence ----------
+
+async def save_subscription(user_id: str, keywords: list[str], threshold: float):
+    db = await get_db()
+    await db.execute(
+        """INSERT OR REPLACE INTO subscriptions (user_id, keywords, threshold)
+           VALUES (?, ?, ?)""",
+        (user_id, json.dumps(keywords, ensure_ascii=False), threshold),
+    )
+    await db.commit()
+
+
+async def delete_subscription(user_id: str):
+    db = await get_db()
+    await db.execute("DELETE FROM subscriptions WHERE user_id = ?", (user_id,))
+    await db.commit()
+
+
+async def load_subscriptions() -> dict:
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT user_id, keywords, threshold FROM subscriptions")
+    result = {}
+    for row in rows:
+        r = dict(row)
+        try:
+            r["keywords"] = json.loads(r["keywords"])
+        except (json.JSONDecodeError, TypeError):
+            r["keywords"] = []
+        result[r["user_id"]] = r
+    return result
+
+
+# ---------- Report Persistence ----------
+
+async def save_report(report_id: str, alert, news_id: int | None = None, sentiment_id: int | None = None):
+    db = await get_db()
+    await db.execute(
+        """INSERT OR REPLACE INTO reports (id, news_id, sentiment_id, alert_level, triggered_keywords, deep_analysis)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (report_id, news_id, sentiment_id, alert.alert_level,
+         json.dumps(alert.triggered_keywords, ensure_ascii=False),
+         alert.deep_analysis),
+    )
+    await db.commit()
+
+
+async def load_report(report_id: str) -> dict | None:
+    db = await get_db()
+    rows = await db.execute_fetchall("SELECT * FROM reports WHERE id = ?", (report_id,))
+    if not rows:
+        return None
+    r = dict(rows[0])
+    try:
+        r["triggered_keywords"] = json.loads(r["triggered_keywords"])
+    except (json.JSONDecodeError, TypeError):
+        r["triggered_keywords"] = []
+    return r

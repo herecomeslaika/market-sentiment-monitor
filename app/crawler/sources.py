@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 
 import aiohttp
 
-from app import deps
 from app.models import NewsItem
 
 logger = logging.getLogger(__name__)
@@ -28,6 +27,7 @@ class SourceConfig:
     params: dict = field(default_factory=dict)
     parser: str = ""
     enabled: bool = True
+    retries: int = 2
 
 
 BROWSER_HEADERS = {
@@ -51,7 +51,7 @@ def default_sources() -> dict[str, SourceConfig]:
         "sina": SourceConfig(
             name="新浪财经",
             url="https://feed.mix.sina.com.cn/api/roll/get",
-            params={"pageid": "153", "lid": "2516", "k": "", "num": "20", "page": "1"},
+            params={"pageid": "153", "lid": "2516", "k": "", "num": "50", "page": "1"},
             headers={**BROWSER_HEADERS, "Referer": "https://finance.sina.com.cn/"},
             parser="sina",
         ),
@@ -65,9 +65,10 @@ def default_sources() -> dict[str, SourceConfig]:
                 "Accept": "application/json, text/plain, */*",
             },
             parser="cls",
+            retries=1,
         ),
-        "eastmoney_info": SourceConfig(
-            name="东方财富-要闻",
+        "eastmoney": SourceConfig(
+            name="东方财富",
             url="https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
             params={
                 "client": "web",
@@ -97,6 +98,14 @@ def default_sources() -> dict[str, SourceConfig]:
                 "x-version": "1.0.0",
             },
             parser="jin10",
+            retries=1,
+        ),
+        "36kr": SourceConfig(
+            name="36氪",
+            url="https://36kr.com/api/newsflash",
+            params={"per_page": "20", "page": "1"},
+            headers={**BROWSER_HEADERS, "Referer": "https://36kr.com/newsflashes"},
+            parser="kr36",
         ),
     }
 
@@ -161,9 +170,8 @@ def parse_eastmoney(text: str, source_name: str) -> list[NewsItem]:
     items = []
     try:
         data = json.loads(text)
-        news_list = data.get("data", {}).get("list", [])
-        if not news_list:
-            return items
+        d = data.get("data") or {}
+        news_list = d.get("list", []) if isinstance(d, dict) else []
         for entry in news_list:
             if not isinstance(entry, dict):
                 continue
@@ -211,11 +219,40 @@ def parse_jin10(text: str, source_name: str) -> list[NewsItem]:
     return items
 
 
+def parse_kr36(text: str, source_name: str) -> list[NewsItem]:
+    items = []
+    try:
+        data = json.loads(text)
+        d = data.get("data") or {}
+        news_list = d.get("items", d.get("newsflashes", [])) if isinstance(d, dict) else []
+        for entry in news_list:
+            if not isinstance(entry, dict):
+                continue
+            title = entry.get("title", "").strip()
+            if not title:
+                title = entry.get("entity", {}).get("title", "").strip() if isinstance(entry.get("entity"), dict) else ""
+            if not title:
+                continue
+            content = entry.get("description", "") or entry.get("entity", {}).get("content", "") if isinstance(entry.get("entity"), dict) else ""
+            url = entry.get("web_url", "") or entry.get("news_url", "")
+            if not url and entry.get("id"):
+                url = f"https://36kr.com/newsflashes/{entry['id']}"
+            items.append(NewsItem(
+                source="36氪", title=title, url=url,
+                content_snippet=_clean_html(content),
+                title_hash=compute_title_hash(title),
+            ))
+    except Exception as e:
+        logger.warning("36kr parse error: %s", e)
+    return items
+
+
 _PARSERS = {
     "sina": parse_sina,
     "cls": parse_cls,
     "eastmoney": parse_eastmoney,
     "jin10": parse_jin10,
+    "kr36": parse_kr36,
 }
 
 
@@ -225,26 +262,39 @@ async def fetch_source(
 ) -> list[NewsItem]:
     if not source.enabled:
         return []
+
     timeout = aiohttp.ClientTimeout(total=15)
-    try:
-        async with session.request(
-            source.method, source.url,
-            params=source.params, headers=source.headers, timeout=timeout,
-        ) as response:
-            if response.status != 200:
-                logger.warning("%s returned status %d", source.name, response.status)
-                return []
-            text = await response.text()
-            parser = _PARSERS.get(source.parser)
-            if parser:
-                return parser(text, source.name)
-            # Fallback: try RSS
-            from app.crawler.rss_parser import parse_rss_xml
-            return parse_rss_xml(text, source.name)
-    except aiohttp.ClientError as e:
-        logger.warning("Fetch failed for %s: %s", source.name, e)
-    except Exception as e:
-        logger.error("Unexpected error fetching %s: %s", source.name, e, exc_info=True)
+    last_error = None
+
+    for attempt in range(source.retries + 1):
+        try:
+            async with session.request(
+                source.method, source.url,
+                params=source.params, headers=source.headers, timeout=timeout,
+            ) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    parser = _PARSERS.get(source.parser)
+                    if parser:
+                        return parser(text, source.name)
+                    return []
+                logger.warning(
+                    "%s returned status %d (attempt %d/%d)",
+                    source.name, response.status, attempt + 1, source.retries + 1,
+                )
+        except aiohttp.ClientError as e:
+            last_error = e
+            logger.warning(
+                "Fetch failed for %s: %s (attempt %d/%d)",
+                source.name, e, attempt + 1, source.retries + 1,
+            )
+        except Exception as e:
+            logger.error("Unexpected error fetching %s: %s", source.name, e, exc_info=True)
+            return []
+
+        if attempt < source.retries:
+            await asyncio.sleep(1 * (attempt + 1))
+
     return []
 
 

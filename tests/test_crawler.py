@@ -7,7 +7,7 @@ import pytest
 
 from app import deps
 from app.crawler.sources import (
-    compute_title_hash, parse_sina, parse_cls, parse_eastmoney, parse_jin10, _clean_html,
+    compute_title_hash, parse_sina, parse_cls, parse_eastmoney, parse_jin10, parse_kr36, _clean_html,
 )
 from app.crawler.dedup import check_and_register
 from app.models import NewsItem
@@ -119,6 +119,37 @@ class TestParseJin10:
 
     def test_parse_empty(self):
         items = parse_jin10('{"data": []}', "金十数据")
+        assert items == []
+
+
+class TestParseKr36:
+    def test_parse_items(self):
+        data = json.dumps({
+            "data": {
+                "items": [
+                    {"title": "36氪新闻标题", "id": "123", "web_url": "https://36kr.com/p/123"},
+                ]
+            }
+        })
+        items = parse_kr36(data, "36氪")
+        assert len(items) == 1
+        assert items[0].source == "36氪"
+        assert items[0].title == "36氪新闻标题"
+
+    def test_parse_entity_fallback(self):
+        data = json.dumps({
+            "data": {
+                "items": [
+                    {"entity": {"title": "实体标题", "content": "内容"}, "id": "456"},
+                ]
+            }
+        })
+        items = parse_kr36(data, "36氪")
+        assert len(items) == 1
+        assert items[0].title == "实体标题"
+
+    def test_parse_empty(self):
+        items = parse_kr36('{"data": {"items": []}}', "36氪")
         assert items == []
 
 

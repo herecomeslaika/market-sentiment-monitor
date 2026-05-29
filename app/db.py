@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     PRIMARY KEY (user_id)
 );
 
+CREATE TABLE IF NOT EXISTS reports (
+    id TEXT PRIMARY KEY,
+    news_id INTEGER REFERENCES news(id),
+    sentiment_id INTEGER REFERENCES sentiment(id),
+    alert_level TEXT NOT NULL DEFAULT 'warning',
+    triggered_keywords TEXT DEFAULT '',
+    deep_analysis TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_news_hash ON news(title_hash);
 CREATE INDEX IF NOT EXISTS idx_news_source ON news(source);
 CREATE INDEX IF NOT EXISTS idx_news_created ON news(created_at);
@@ -55,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_sentiment_score ON sentiment(score);
 CREATE INDEX IF NOT EXISTS idx_sentiment_processed ON sentiment(processed_at);
 CREATE INDEX IF NOT EXISTS idx_alerts_level ON alerts(alert_level);
 CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at);
+CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at);
 """
 
 # Module-level connection (set at startup, closed at shutdown)

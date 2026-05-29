@@ -11,7 +11,7 @@ from app.models import Subscription
 
 if TYPE_CHECKING:
     from config.settings import Settings
-    from app.crawler.sources import SourceConfig
+    from app.crawler.sources import SourceConfig, default_sources
 
 # Configuration (set at startup)
 settings: Settings | None = None

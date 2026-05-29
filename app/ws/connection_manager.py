@@ -41,6 +41,17 @@ class ConnectionManager:
         for uid in target_user_ids:
             await self.send_to_user(uid, message)
 
+    async def broadcast(self, data: dict):
+        """Broadcast data to all connected WebSocket clients."""
+        disconnected = []
+        for uid, ws in self.active_connections.items():
+            try:
+                await ws.send_json(data)
+            except Exception:
+                disconnected.append(uid)
+        for uid in disconnected:
+            self.disconnect(uid)
+
 
 def get_manager() -> ConnectionManager:
     global _manager

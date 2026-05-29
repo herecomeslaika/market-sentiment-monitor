@@ -27,8 +27,11 @@ async def process_news_item(item) -> SentimentResult:
 
 async def fast_track_consumer():
     from app.repository import save_news, save_sentiment
+    from app.ws.connection_manager import get_manager
 
     logger.info("Fast track consumer started")
+    ws_manager = get_manager()
+
     while True:
         try:
             item = await deps.news_queue.get()
@@ -42,6 +45,22 @@ async def fast_track_consumer():
 
             result.news_db_id = news_id
             result.sentiment_db_id = sentiment_db_id
+
+            # Push scored result to all WebSocket clients
+            try:
+                await ws_manager.broadcast({
+                    "type": "sentiment",
+                    "payload": {
+                        "title": result.news_item.title,
+                        "title_hash": result.news_item.title_hash,
+                        "source": result.news_item.source,
+                        "score": result.score,
+                        "label": result.label,
+                        "confidence": result.confidence,
+                    },
+                })
+            except Exception:
+                pass  # WebSocket push is non-critical
 
             await deps.scored_queue.put(result)
             logger.debug("Scored: %.3f (%s) - %s", result.score, result.label, item.title[:40])

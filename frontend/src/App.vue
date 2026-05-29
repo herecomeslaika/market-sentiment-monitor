@@ -2,154 +2,204 @@
   <div class="dashboard">
     <header class="header">
       <h1>市场情绪监控</h1>
-      <div class="status-bar">
-        <span :class="['status-dot', connected ? 'online' : 'offline']"></span>
-        <span>{{ connected ? '已连接' : '未连接' }}</span>
-        <span class="spacer"></span>
-        <span>队列: {{ health.news_queue_size }}/{{ health.scored_queue_size }}/{{ health.alert_queue_size }}</span>
-        <span>订阅: {{ health.active_subscriptions }}</span>
-      </div>
+      <span class="status" :class="{ connected: wsConnected }">
+        {{ wsConnected ? '已连接' : '未连接' }}
+      </span>
     </header>
-
     <div class="grid">
-      <!-- Sentiment Trend Chart -->
-      <section class="card span-2">
-        <h2>情绪趋势</h2>
-        <SentimentChart :data="sentimentTrend" />
-      </section>
-
-      <!-- Alert Feed -->
-      <section class="card">
-        <h2>实时告警</h2>
-        <AlertFeed :alerts="alerts" />
-      </section>
-
-      <!-- News Feed -->
-      <section class="card">
-        <h2>最新新闻</h2>
-        <NewsFeed :news="newsList" />
-      </section>
-
-      <!-- Keyword Stats -->
-      <section class="card">
-        <h2>关键词统计</h2>
-        <KeywordStats :stats="keywordStats" />
-      </section>
-
-      <!-- Subscription Manager -->
-      <section class="card">
-        <h2>订阅管理</h2>
-        <SubscriptionManager />
-      </section>
+      <div class="chart-area">
+        <SentimentChart :trend="trend" />
+      </div>
+      <div class="sidebar">
+        <KeywordStats :keywords="keywords" />
+        <SubscriptionManager
+          :subscription="subscription"
+          @subscribe="handleSubscribe"
+          @unsubscribe="handleUnsubscribe"
+        />
+      </div>
+    </div>
+    <div class="feeds">
+      <NewsFeed :news="mergedNews" />
+      <AlertFeed :alerts="alerts" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import SentimentChart from './components/SentimentChart.vue'
-import AlertFeed from './components/AlertFeed.vue'
 import NewsFeed from './components/NewsFeed.vue'
+import AlertFeed from './components/AlertFeed.vue'
 import KeywordStats from './components/KeywordStats.vue'
 import SubscriptionManager from './components/SubscriptionManager.vue'
-import { useApi } from './composables/useApi.js'
 
-const health = ref({})
-const sentimentTrend = ref([])
+const news = ref([])
+const sentiments = ref([])
 const alerts = ref([])
-const newsList = ref([])
-const keywordStats = ref([])
-const connected = ref(false)
-
-const api = useApi()
-
+const trend = ref([])
+const keywords = ref([])
+const subscription = ref(null)
+const wsConnected = ref(false)
 let ws = null
-let pollTimer = null
+let wsReconnectTimer = null
 
-async function fetchHealth() {
+// Merge news with sentiment scores
+const mergedNews = computed(() => {
+  const scoreMap = new Map()
+  for (const s of sentiments.value) {
+    if (s.title_hash) scoreMap.set(s.title_hash, s)
+  }
+  return news.value.map(item => {
+    const scoreData = scoreMap.get(item.title_hash)
+    if (scoreData) {
+      return { ...item, score: scoreData.score, label: scoreData.label }
+    }
+    return item
+  }).sort((a, b) => {
+    // Items with scores first, then by recency
+    if (a.score != null && b.score == null) return -1
+    if (a.score == null && b.score != null) return 1
+    return 0
+  })
+})
+
+async function fetchData() {
   try {
-    health.value = await api.get('/health')
-  } catch {}
+    const [newsRes, sentRes, trendRes, kwRes] = await Promise.all([
+      fetch('/news/history?limit=50').then(r => r.json()),
+      fetch('/sentiment/history?hours=24').then(r => r.json()),
+      fetch('/sentiment/trend').then(r => r.json()),
+      fetch('/stats/keywords').then(r => r.json()),
+    ])
+    if (Array.isArray(newsRes)) news.value = newsRes
+    if (Array.isArray(sentRes)) sentiments.value = sentRes
+    if (Array.isArray(trendRes)) trend.value = trendRes
+    if (Array.isArray(kwRes)) keywords.value = kwRes
+  } catch (e) {
+    console.error('Failed to fetch data:', e)
+  }
 }
 
-async function fetchSentimentTrend() {
-  try {
-    sentimentTrend.value = await api.get('/sentiment/trend?hours=24')
-  } catch {}
-}
+function connectWS() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
+  const url = `${protocol}://${location.host}/ws/dashboard`
+  ws = new WebSocket(url)
 
-async function fetchNews() {
-  try {
-    newsList.value = await api.get('/news/history?limit=20')
-  } catch {}
-}
+  ws.onopen = () => {
+    wsConnected.value = true
+    // Send subscription if exists
+    if (subscription.value) {
+      ws.send(JSON.stringify({
+        action: 'subscribe',
+        keywords: subscription.value.keywords,
+        threshold: subscription.value.threshold,
+      }))
+    }
+  }
 
-async function fetchAlerts() {
-  try {
-    const data = await api.get('/alerts/history?limit=20')
-    alerts.value = data
-  } catch {}
-}
-
-async function fetchKeywordStats() {
-  try {
-    keywordStats.value = await api.get('/stats/keywords?hours=24')
-  } catch {}
-}
-
-async function pollData() {
-  await Promise.all([
-    fetchHealth(),
-    fetchSentimentTrend(),
-    fetchNews(),
-    fetchAlerts(),
-    fetchKeywordStats(),
-  ])
-}
-
-function connectWebSocket() {
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  ws = new WebSocket(`${protocol}//${location.host}/ws/dashboard`)
-
-  ws.onopen = () => { connected.value = true }
-  ws.onclose = () => { connected.value = false; setTimeout(connectWebSocket, 3000) }
   ws.onmessage = (event) => {
     try {
-      const msg = JSON.parse(event.data)
-      if (msg.type === 'alert') {
-        alerts.value.unshift(msg.payload)
-        if (alerts.value.length > 50) alerts.value.pop()
+      const data = JSON.parse(event.data)
+      if (data.type === 'news') {
+        news.value = [data.payload, ...news.value].slice(0, 100)
+      } else if (data.type === 'sentiment') {
+        sentiments.value = [data.payload, ...sentiments.value].slice(0, 100)
+      } else if (data.type === 'alert') {
+        alerts.value = [formatAlert(data.payload), ...alerts.value].slice(0, 50)
       }
-    } catch {}
+    } catch (e) {
+      console.error('WS message error:', e)
+    }
+  }
+
+  ws.onclose = () => {
+    wsConnected.value = false
+    // Reconnect after 3s
+    wsReconnectTimer = setTimeout(connectWS, 3000)
+  }
+
+  ws.onerror = () => {
+    wsConnected.value = false
+  }
+}
+
+function formatAlert(payload) {
+  return {
+    alert_level: payload.alert_level || 'warning',
+    title: payload.news_item?.title || payload.title || '',
+    score: payload.sentiment?.score ?? payload.score ?? null,
+    label: payload.sentiment?.label || payload.label || '',
+    deep_analysis: payload.deep_analysis || null,
+    keywords: payload.triggered_keywords || [],
+    created_at: new Date().toLocaleString('zh-CN'),
+  }
+}
+
+function handleSubscribe(data) {
+  subscription.value = data
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'subscribe', keywords: data.keywords, threshold: data.threshold }))
+  }
+}
+
+function handleUnsubscribe() {
+  subscription.value = null
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ action: 'unsubscribe' }))
   }
 }
 
 onMounted(() => {
-  pollData()
-  pollTimer = setInterval(pollData, 15000)
-  connectWebSocket()
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
-  if (ws) ws.close()
+  fetchData()
+  connectWS()
+  // Refresh data every 30s
+  const interval = setInterval(fetchData, 30000)
+  onUnmounted(() => {
+    clearInterval(interval)
+    if (ws) ws.close()
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+  })
 })
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }
-.dashboard { max-width: 1400px; margin: 0 auto; padding: 20px; }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding: 16px 20px; background: #1e293b; border-radius: 12px; }
-.header h1 { font-size: 20px; font-weight: 600; }
-.status-bar { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #94a3b8; }
-.spacer { flex: 1; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; }
-.status-dot.online { background: #22c55e; }
-.status-dot.offline { background: #ef4444; }
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.card { background: #1e293b; border-radius: 12px; padding: 20px; }
-.card.span-2 { grid-column: span 2; }
-.card h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #cbd5e1; }
-@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .card.span-2 { grid-column: span 1; } }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0f2f5;
+  color: #333;
+}
+.dashboard { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.header h1 { font-size: 24px; }
+.status {
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: #fee;
+  color: #e74c3c;
+}
+.status.connected { background: #e8f8ef; color: #27ae60; }
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.sidebar { display: flex; flex-direction: column; gap: 16px; }
+.feeds {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 768px) {
+  .grid { grid-template-columns: 1fr; }
+  .feeds { grid-template-columns: 1fr; }
+}
 </style>

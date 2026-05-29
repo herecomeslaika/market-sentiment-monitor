@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app import deps
 from app.models import Subscription
-from app.subscription import manager
+from app.subscription import manager as sub_manager
 
 router = APIRouter(tags=["api"])
 
@@ -50,24 +50,24 @@ async def status():
 
 @router.post("/subscriptions", response_model=Subscription)
 async def create_subscription(sub: Subscription):
-    manager.add_subscription(sub)
-    return sub
+    result = await sub_manager.add_subscription(sub.user_id, sub.keywords, sub.threshold)
+    return result
 
 
 @router.delete("/subscriptions/{user_id}")
 async def delete_subscription(user_id: str):
-    manager.remove_subscription(user_id)
+    await sub_manager.remove_subscription(user_id)
     return {"status": "removed"}
 
 
 @router.get("/subscriptions", response_model=list[Subscription])
 async def list_subscriptions():
-    return manager.list_subscriptions()
+    return list(sub_manager.list_subscriptions().values())
 
 
 @router.get("/subscriptions/{user_id}", response_model=Subscription | None)
 async def get_subscription(user_id: str):
-    return manager.get_subscription(user_id)
+    return sub_manager.get_subscription(user_id)
 
 
 # ---------- Source Management ----------

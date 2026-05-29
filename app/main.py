@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Load subscriptions from DB
+    from app.subscription.manager import load_subscriptions_from_db
+    await load_subscriptions_from_db()
+
     # Initialize FinBERT process pool at startup
     from app.sentiment.finbert_worker import init_model
     deps.finbert_pool = ProcessPoolExecutor(
