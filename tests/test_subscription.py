@@ -1,10 +1,9 @@
-"""Tests for subscription matching."""
+"""Tests for subscription matcher."""
 import pytest
 
 from app import deps
 from app.models import AlertPayload, NewsItem, SentimentResult, Subscription
 from app.subscription.matcher import match_subscriptions
-from config.settings import Settings
 
 
 def _make_alert(title: str, score: float) -> AlertPayload:
@@ -53,3 +52,27 @@ class TestMatchSubscriptions:
         alert = _make_alert("美联储降息", -0.6)
         matched = match_subscriptions(alert)
         assert len(matched) == 2
+
+    def test_positive_score_negative_threshold(self):
+        deps.active_subscriptions["u1"] = Subscription(
+            user_id="u1", keywords=["利好"], threshold=-0.5
+        )
+        alert = _make_alert("利好消息", 0.6)
+        # Positive score doesn't cross negative threshold
+        matched = match_subscriptions(alert)
+        assert len(matched) == 0
+
+    def test_empty_subscriptions(self):
+        alert = _make_alert("测试", -0.8)
+        matched = match_subscriptions(alert)
+        assert len(matched) == 0
+
+    def test_multiple_keyword_match(self):
+        deps.active_subscriptions["u1"] = Subscription(
+            user_id="u1", keywords=["美联储", "降息", "基点"], threshold=-0.5
+        )
+        alert = _make_alert("美联储宣布降息25个基点", -0.8)
+        matched = match_subscriptions(alert)
+        assert len(matched) == 1
+        _, kws = matched[0]
+        assert len(kws) == 3

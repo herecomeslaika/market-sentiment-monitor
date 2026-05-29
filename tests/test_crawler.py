@@ -1,17 +1,16 @@
 """Tests for the crawler module."""
-import asyncio
 import json
-from collections import OrderedDict
 
 import pytest
 
-from app import deps
 from app.crawler.sources import (
     compute_title_hash, parse_sina, parse_cls, parse_eastmoney, parse_jin10, parse_kr36, _clean_html,
+    SourceConfig, default_sources, _PARSERS,
 )
 from app.crawler.dedup import check_and_register
-from app.models import NewsItem
+from app import deps
 from config.settings import Settings
+from collections import OrderedDict
 
 
 class TestComputeTitleHash:
@@ -86,7 +85,7 @@ class TestParseCls:
         assert items[0].title.startswith("这是一条")
 
 
-class TestParseEastmoney:
+class TestParseEastMoney:
     def test_parse_valid(self):
         data = json.dumps({
             "data": {
@@ -151,6 +150,30 @@ class TestParseKr36:
     def test_parse_empty(self):
         items = parse_kr36('{"data": {"items": []}}', "36氪")
         assert items == []
+
+
+class TestSourceConfig:
+    def test_default_sources(self):
+        sources = default_sources()
+        assert "sina" in sources
+        assert "cls" in sources
+        assert "eastmoney" in sources
+        assert "jin10" in sources
+        assert "36kr" in sources
+        assert len(sources) == 5
+
+    def test_source_config_fields(self):
+        sources = default_sources()
+        sina = sources["sina"]
+        assert sina.name == "新浪财经"
+        assert sina.parser == "sina"
+        assert sina.enabled is True
+        assert sina.retries >= 1
+
+    def test_all_parsers_registered(self):
+        sources = default_sources()
+        for key, src in sources.items():
+            assert src.parser in _PARSERS, f"Parser {src.parser} not registered for {key}"
 
 
 class TestDedup:
