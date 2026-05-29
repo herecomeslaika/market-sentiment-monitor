@@ -1,0 +1,13 @@
+services:
+  sentiment-monitor:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SENTIMENT_DEEPSEEK_API_KEY=${SENTIMENT_DEEPSEEK_API_KEY}
+      - SENTIMENT_RSS_POLL_INTERVAL_SECONDS=30
+      - SENTIMENT_MODEL_NAME=lxyuan/distilbert-base-multilingual-cased-sentiments-student
+      - SENTIMENT_PROCESS_POOL_SIZE=2
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
