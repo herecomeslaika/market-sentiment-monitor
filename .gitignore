@@ -49,5 +49,7 @@ data/
 
 # OS
 .DS_Store
-.DS_Store
 Thumbs.db
+
+# Node
+node_modules/
