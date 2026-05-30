@@ -5,7 +5,7 @@ import pytest
 
 from app.crawler.sources import (
     compute_title_hash, parse_sina, parse_cls, parse_eastmoney, parse_jin10, parse_kr36, _clean_html,
-    SourceConfig, default_sources, _PARSERS,
+    SourceConfig, SourceHealth, default_sources, get_source_health, _PARSERS,
 )
 from app.crawler.dedup import check_and_register
 from app import deps
@@ -45,10 +45,10 @@ class TestParseSina:
                 ]
             }
         })
-        items = parse_sina(data, "新浪财经")
+        items = parse_sina(data, "新浪财经-A股")
         assert len(items) == 2
         assert items[0].title == "测试标题"
-        assert items[0].source == "新浪财经"
+        assert items[0].source == "新浪财经-A股"
 
     def test_parse_empty(self):
         items = parse_sina("{}", "新浪财经")
@@ -103,6 +103,10 @@ class TestParseEastMoney:
         items = parse_eastmoney(data, "东方财富")
         assert items == []
 
+    def test_parse_null_data(self):
+        items = parse_eastmoney('{"data": null}', "东方财富")
+        assert items == []
+
 
 class TestParseJin10:
     def test_parse_valid(self):
@@ -155,17 +159,19 @@ class TestParseKr36:
 class TestSourceConfig:
     def test_default_sources(self):
         sources = default_sources()
-        assert "sina" in sources
-        assert "cls" in sources
+        assert "sina_stock" in sources
+        assert "sina_hk" in sources
+        assert "sina_us" in sources
         assert "eastmoney" in sources
+        assert "cls" in sources
         assert "jin10" in sources
-        assert "36kr" in sources
-        assert len(sources) == 5
+        assert "kr36" in sources
+        assert len(sources) == 7
 
     def test_source_config_fields(self):
         sources = default_sources()
-        sina = sources["sina"]
-        assert sina.name == "新浪财经"
+        sina = sources["sina_stock"]
+        assert sina.name == "新浪财经-A股"
         assert sina.parser == "sina"
         assert sina.enabled is True
         assert sina.retries >= 1
@@ -174,6 +180,22 @@ class TestSourceConfig:
         sources = default_sources()
         for key, src in sources.items():
             assert src.parser in _PARSERS, f"Parser {src.parser} not registered for {key}"
+
+
+class TestSourceHealth:
+    def test_health_init(self):
+        h = SourceHealth()
+        assert h.consecutive_failures == 0
+        assert h.is_healthy is True
+
+    def test_health_unhealthy(self):
+        h = SourceHealth()
+        h.consecutive_failures = 5
+        assert h.is_healthy is False
+
+    def test_get_source_health(self):
+        health = get_source_health()
+        assert isinstance(health, dict)
 
 
 class TestDedup:

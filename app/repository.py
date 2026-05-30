@@ -209,11 +209,17 @@ async def load_subscriptions() -> dict:
 async def save_report(report_id: str, alert, news_id: int | None = None, sentiment_id: int | None = None):
     db = await get_db()
     await db.execute(
-        """INSERT OR REPLACE INTO reports (id, news_id, sentiment_id, alert_level, triggered_keywords, deep_analysis)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT OR REPLACE INTO reports
+           (id, news_id, sentiment_id, alert_level, triggered_keywords, deep_analysis,
+            news_title, news_source, news_url, news_snippet,
+            sentiment_score, sentiment_label, sentiment_confidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (report_id, news_id, sentiment_id, alert.alert_level,
          json.dumps(alert.triggered_keywords, ensure_ascii=False),
-         alert.deep_analysis),
+         alert.deep_analysis,
+         alert.news_item.title, alert.news_item.source,
+         alert.news_item.url, alert.news_item.content_snippet,
+         alert.sentiment.score, alert.sentiment.label, alert.sentiment.confidence),
     )
     await db.commit()
 
@@ -229,3 +235,34 @@ async def load_report(report_id: str) -> dict | None:
     except (json.JSONDecodeError, TypeError):
         r["triggered_keywords"] = []
     return r
+
+
+async def query_reports(limit: int = 20, offset: int = 0, level: str | None = None):
+    db = await get_db()
+    if level:
+        rows = await db.execute_fetchall(
+            """SELECT id, alert_level, triggered_keywords, deep_analysis, created_at,
+                      news_title, news_source, news_url, news_snippet,
+                      sentiment_score, sentiment_label, sentiment_confidence
+               FROM reports WHERE alert_level = ?
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (level, limit, offset),
+        )
+    else:
+        rows = await db.execute_fetchall(
+            """SELECT id, alert_level, triggered_keywords, deep_analysis, created_at,
+                      news_title, news_source, news_url, news_snippet,
+                      sentiment_score, sentiment_label, sentiment_confidence
+               FROM reports
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+    results = []
+    for row in rows:
+        r = dict(row)
+        try:
+            r["triggered_keywords"] = json.loads(r["triggered_keywords"])
+        except (json.JSONDecodeError, TypeError):
+            r["triggered_keywords"] = []
+        results.append(r)
+    return results

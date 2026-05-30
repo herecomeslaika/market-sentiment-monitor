@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Limit concurrent DeepSeek API calls (created lazily)
 _semaphore: asyncio.Semaphore | None = None
+MAX_DEEP_RETRIES = 2
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -28,7 +29,7 @@ def should_trigger_deep_analysis(score: float, matched_keywords: list[str]) -> b
     return False
 
 
-async def run_deep_analysis(sentiment) -> str | None:
+async def run_deep_analysis(sentiment, retries: int = MAX_DEEP_RETRIES) -> str | None:
     from app.analysis.langgraph_flow import get_compiled_graph
 
     initial_state = {
@@ -43,18 +44,32 @@ async def run_deep_analysis(sentiment) -> str | None:
         "error": None,
     }
     async with _get_semaphore():
-        try:
-            result = await asyncio.wait_for(
-                get_compiled_graph().ainvoke(initial_state),
-                timeout=90,
-            )
-            return result.get("final_report")
-        except asyncio.TimeoutError:
-            logger.warning("Deep analysis timed out for: %s", sentiment.news_item.title[:40])
-            return None
-        except Exception as e:
-            logger.error("Deep analysis error: %s", e, exc_info=True)
-            return None
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                result = await asyncio.wait_for(
+                    get_compiled_graph().ainvoke(initial_state),
+                    timeout=90,
+                )
+                report = result.get("final_report")
+                if report and not result.get("error"):
+                    return report
+                # Partial report is still useful
+                if report:
+                    return report
+                last_error = result.get("error", "empty report")
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+                logger.warning("Deep analysis timed out (attempt %d/%d): %s", attempt + 1, retries + 1, sentiment.news_item.title[:40])
+            except Exception as e:
+                last_error = str(e)
+                logger.error("Deep analysis error (attempt %d/%d): %s", attempt + 1, retries + 1, e)
+
+            if attempt < retries:
+                await asyncio.sleep(2 * (attempt + 1))
+
+        logger.error("Deep analysis failed after %d attempts for: %s (last error: %s)", retries + 1, sentiment.news_item.title[:40], last_error)
+        return None
 
 
 async def slow_track_consumer():
@@ -96,7 +111,7 @@ async def slow_track_consumer():
                 await save_alert(sentiment.news_db_id, sentiment.sentiment_db_id, alert)
 
             # Store report for later followup/export
-            store_report(alert)
+            await store_report(alert)
 
             await deps.alert_queue.put(alert)
             logger.info(

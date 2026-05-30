@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -30,6 +31,22 @@ class SourceConfig:
     retries: int = 2
 
 
+@dataclass
+class SourceHealth:
+    """Track health of each source for auto-disable."""
+    consecutive_failures: int = 0
+    last_success: float = 0.0
+    last_failure: float = 0.0
+    total_fetched: int = 0
+    total_failures: int = 0
+
+    @property
+    def is_healthy(self) -> bool:
+        if self.consecutive_failures >= 5:
+            return False
+        return True
+
+
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -48,12 +65,38 @@ def _clean_html(text: str) -> str:
 
 def default_sources() -> dict[str, SourceConfig]:
     return {
-        "sina": SourceConfig(
-            name="新浪财经",
+        "sina_stock": SourceConfig(
+            name="新浪财经-A股",
             url="https://feed.mix.sina.com.cn/api/roll/get",
-            params={"pageid": "153", "lid": "2516", "k": "", "num": "50", "page": "1"},
+            params={"pageid": "153", "lid": "2516", "num": "50", "page": "1"},
             headers={**BROWSER_HEADERS, "Referer": "https://finance.sina.com.cn/"},
             parser="sina",
+        ),
+        "sina_hk": SourceConfig(
+            name="新浪财经-港股",
+            url="https://feed.mix.sina.com.cn/api/roll/get",
+            params={"pageid": "153", "lid": "2517", "num": "30", "page": "1"},
+            headers={**BROWSER_HEADERS, "Referer": "https://finance.sina.com.cn/"},
+            parser="sina",
+        ),
+        "sina_us": SourceConfig(
+            name="新浪财经-美股",
+            url="https://feed.mix.sina.com.cn/api/roll/get",
+            params={"pageid": "153", "lid": "2518", "num": "30", "page": "1"},
+            headers={**BROWSER_HEADERS, "Referer": "https://finance.sina.com.cn/"},
+            parser="sina",
+        ),
+        "eastmoney": SourceConfig(
+            name="东方财富",
+            url="https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
+            params={
+                "client": "web", "biz": "web_news_col", "column": "250",
+                "order": "1", "needInteractData": "0", "page_index": "1",
+                "page_size": "20", "req_trace": "",
+            },
+            headers={**BROWSER_HEADERS, "Referer": "https://finance.eastmoney.com/"},
+            parser="eastmoney",
+            retries=1,
         ),
         "cls": SourceConfig(
             name="财联社",
@@ -67,40 +110,15 @@ def default_sources() -> dict[str, SourceConfig]:
             parser="cls",
             retries=1,
         ),
-        "eastmoney": SourceConfig(
-            name="东方财富",
-            url="https://np-listapi.eastmoney.com/comm/web/getNewsByColumns",
-            params={
-                "client": "web",
-                "biz": "web_news_col",
-                "column": "250",
-                "order": "1",
-                "needInteractData": "0",
-                "page_index": "1",
-                "page_size": "20",
-                "req_trace": "",
-            },
-            headers={**BROWSER_HEADERS, "Referer": "https://finance.eastmoney.com/"},
-            parser="eastmoney",
-        ),
         "jin10": SourceConfig(
             name="金十数据",
             url="https://flash-api.jin10.com/get_flash_list",
-            params={
-                "channel": "-8200",
-                "vip": "1",
-                "num": "20",
-            },
-            headers={
-                **BROWSER_HEADERS,
-                "Referer": "https://www.jin10.com/",
-                "x-appid": "basic",
-                "x-version": "1.0.0",
-            },
+            params={"channel": "-8200", "vip": "1", "num": "20"},
+            headers={**BROWSER_HEADERS, "Referer": "https://www.jin10.com/", "x-appid": "basic"},
             parser="jin10",
             retries=1,
         ),
-        "36kr": SourceConfig(
+        "kr36": SourceConfig(
             name="36氪",
             url="https://36kr.com/api/newsflash",
             params={"per_page": "20", "page": "1"},
@@ -108,6 +126,39 @@ def default_sources() -> dict[str, SourceConfig]:
             parser="kr36",
         ),
     }
+
+
+# ---------- Source Health Tracker ----------
+
+_source_health: dict[str, SourceHealth] = {}
+
+
+def get_source_health() -> dict[str, dict]:
+    return {
+        k: {
+            "healthy": v.is_healthy,
+            "consecutive_failures": v.consecutive_failures,
+            "total_fetched": v.total_fetched,
+            "total_failures": v.total_failures,
+        }
+        for k, v in _source_health.items()
+    }
+
+
+def _record_success(key: str, count: int):
+    h = _source_health.setdefault(key, SourceHealth())
+    h.consecutive_failures = 0
+    h.last_success = time.time()
+    h.total_fetched += count
+
+
+def _record_failure(key: str):
+    h = _source_health.setdefault(key, SourceHealth())
+    h.consecutive_failures += 1
+    h.last_failure = time.time()
+    h.total_failures += 1
+    if h.consecutive_failures >= 5:
+        logger.warning("Source %s auto-disabled after %d consecutive failures", key, h.consecutive_failures)
 
 
 # ---------- Parsers ----------
@@ -124,7 +175,7 @@ def parse_sina(text: str, source_name: str) -> list[NewsItem]:
             content = entry.get("intro", "") or entry.get("summary", "")
             url = entry.get("url", "") or entry.get("wapurl", "")
             items.append(NewsItem(
-                source="新浪财经", title=title, url=url,
+                source=source_name, title=title, url=url,
                 content_snippet=_clean_html(content),
                 title_hash=compute_title_hash(title),
             ))
@@ -157,7 +208,7 @@ def parse_cls(text: str, source_name: str) -> list[NewsItem]:
             if not url and entry.get("id"):
                 url = f"https://www.cls.cn/detail/{entry['id']}"
             items.append(NewsItem(
-                source="财联社", title=title, url=url,
+                source=source_name, title=title, url=url,
                 content_snippet=_clean_html(content),
                 title_hash=compute_title_hash(title),
             ))
@@ -181,7 +232,7 @@ def parse_eastmoney(text: str, source_name: str) -> list[NewsItem]:
             content = entry.get("digest", "") or entry.get("content", "")
             url = entry.get("url", "")
             items.append(NewsItem(
-                source="东方财富", title=title, url=url,
+                source=source_name, title=title, url=url,
                 content_snippet=_clean_html(content),
                 title_hash=compute_title_hash(title),
             ))
@@ -195,14 +246,10 @@ def parse_jin10(text: str, source_name: str) -> list[NewsItem]:
     try:
         data = json.loads(text)
         news_list = data.get("data", [])
-        if not news_list:
-            return items
         for entry in news_list:
             if not isinstance(entry, dict):
                 continue
-            title = entry.get("content", "").strip()
-            if not title:
-                title = entry.get("title", "").strip()
+            title = entry.get("content", "").strip() or entry.get("title", "").strip()
             if not title:
                 continue
             content = entry.get("content", "")
@@ -210,7 +257,7 @@ def parse_jin10(text: str, source_name: str) -> list[NewsItem]:
             if entry.get("id"):
                 url = f"https://www.jin10.com/flash/{entry['id']}.html"
             items.append(NewsItem(
-                source="金十数据", title=title[:200], url=url,
+                source=source_name, title=title[:200], url=url,
                 content_snippet=_clean_html(content)[:500],
                 title_hash=compute_title_hash(title[:200]),
             ))
@@ -230,15 +277,20 @@ def parse_kr36(text: str, source_name: str) -> list[NewsItem]:
                 continue
             title = entry.get("title", "").strip()
             if not title:
-                title = entry.get("entity", {}).get("title", "").strip() if isinstance(entry.get("entity"), dict) else ""
+                entity = entry.get("entity")
+                if isinstance(entity, dict):
+                    title = entity.get("title", "").strip()
             if not title:
                 continue
-            content = entry.get("description", "") or entry.get("entity", {}).get("content", "") if isinstance(entry.get("entity"), dict) else ""
+            content = entry.get("description", "")
+            entity = entry.get("entity")
+            if isinstance(entity, dict) and not content:
+                content = entity.get("content", "")
             url = entry.get("web_url", "") or entry.get("news_url", "")
             if not url and entry.get("id"):
                 url = f"https://36kr.com/newsflashes/{entry['id']}"
             items.append(NewsItem(
-                source="36氪", title=title, url=url,
+                source=source_name, title=title, url=url,
                 content_snippet=_clean_html(content),
                 title_hash=compute_title_hash(title),
             ))
@@ -258,13 +310,21 @@ _PARSERS = {
 
 async def fetch_source(
     session: aiohttp.ClientSession,
+    key: str,
     source: SourceConfig,
 ) -> list[NewsItem]:
     if not source.enabled:
         return []
 
+    # Check health - auto-disable unhealthy sources temporarily
+    health = _source_health.get(key)
+    if health and not health.is_healthy:
+        # Re-check every 5 minutes
+        if time.time() - health.last_failure < 300:
+            return []
+        logger.info("Re-attempting unhealthy source: %s", source.name)
+
     timeout = aiohttp.ClientTimeout(total=15)
-    last_error = None
 
     for attempt in range(source.retries + 1):
         try:
@@ -276,14 +336,15 @@ async def fetch_source(
                     text = await response.text()
                     parser = _PARSERS.get(source.parser)
                     if parser:
-                        return parser(text, source.name)
+                        result = parser(text, source.name)
+                        _record_success(key, len(result))
+                        return result
                     return []
                 logger.warning(
                     "%s returned status %d (attempt %d/%d)",
                     source.name, response.status, attempt + 1, source.retries + 1,
                 )
         except aiohttp.ClientError as e:
-            last_error = e
             logger.warning(
                 "Fetch failed for %s: %s (attempt %d/%d)",
                 source.name, e, attempt + 1, source.retries + 1,
@@ -295,17 +356,21 @@ async def fetch_source(
         if attempt < source.retries:
             await asyncio.sleep(1 * (attempt + 1))
 
+    _record_failure(key)
     return []
 
 
 async def fetch_all_sources(session: aiohttp.ClientSession) -> list[NewsItem]:
+    from app import deps
     sources = deps.sources if deps.sources else default_sources()
-    tasks = [fetch_source(session, src) for src in sources.values() if src.enabled]
+    enabled = {k: v for k, v in sources.items() if v.enabled}
+    tasks = [fetch_source(session, k, v) for k, v in enabled.items()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     items = []
-    for result in results:
+    for key, result in zip(enabled.keys(), results):
         if isinstance(result, list):
             items.extend(result)
         else:
-            logger.error("Source error: %s", result)
+            logger.error("Source %s error: %s", key, result)
+            _record_failure(key)
     return items

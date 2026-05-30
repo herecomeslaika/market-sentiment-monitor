@@ -23,6 +23,9 @@
       <NewsFeed :news="mergedNews" />
       <AlertFeed :alerts="alerts" />
     </div>
+    <div class="reports-section">
+      <ReportBrowser />
+    </div>
   </div>
 </template>
 
@@ -33,6 +36,7 @@ import NewsFeed from './components/NewsFeed.vue'
 import AlertFeed from './components/AlertFeed.vue'
 import KeywordStats from './components/KeywordStats.vue'
 import SubscriptionManager from './components/SubscriptionManager.vue'
+import ReportBrowser from './components/ReportBrowser.vue'
 
 const news = ref([])
 const sentiments = ref([])
@@ -197,6 +201,9 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+.reports-section {
+  margin-top: 16px;
 }
 @media (max-width: 768px) {
   .grid { grid-template-columns: 1fr; }

@@ -27,6 +27,7 @@ async def health():
 
 @router.get("/status")
 async def status():
+    from app.crawler.sources import get_source_health
     sources_info = {}
     for key, src in deps.sources.items():
         sources_info[key] = {"name": src.name, "url": src.url, "enabled": src.enabled, "parser": src.parser}
@@ -43,6 +44,7 @@ async def status():
         "connections": len(deps.active_connections),
         "subscriptions": {uid: sub.model_dump() for uid, sub in deps.active_subscriptions.items()},
         "sources": sources_info,
+        "source_health": get_source_health(),
     }
 
 
@@ -172,13 +174,19 @@ class FollowupRequest(BaseModel):
     question: str
 
 
+@router.get("/reports")
+async def list_reports(limit: int = 20, offset: int = 0, level: str | None = None):
+    from app.repository import query_reports
+    return await query_reports(limit, offset, level)
+
+
 @router.get("/reports/{report_id}")
 async def get_report(report_id: str):
     from app.analysis.report_service import get_report as _get_report
-    report = _get_report(report_id)
+    report = await _get_report(report_id)
     if not report:
         raise HTTPException(404, "Report not found")
-    return report.model_dump()
+    return report
 
 
 @router.post("/reports/{report_id}/followup")
@@ -192,9 +200,10 @@ async def followup(report_id: str, body: FollowupRequest):
 
 @router.get("/reports/{report_id}/markdown")
 async def export_report_markdown(report_id: str):
-    from app.analysis.report_service import export_markdown
+    from app.analysis.report_service import get_report as _get_report, export_markdown
     from fastapi.responses import PlainTextResponse
-    md = export_markdown(report_id)
+    report = await _get_report(report_id)
+    md = export_markdown(report)
     if md is None:
         raise HTTPException(404, "Report not found")
     return PlainTextResponse(content=md, media_type="text/markdown")

@@ -1,92 +1,107 @@
 <template>
-  <div class="chart-container" ref="container">
-    <svg :width="width" :height="height">
-      <!-- Grid lines -->
-      <line v-for="y in gridLines" :key="'g'+y" x1="40" :x2="width-10" :y1="y" :y2="y" stroke="#334155" stroke-dasharray="2" />
-      <!-- Y axis labels -->
-      <text v-for="(label, i) in yLabels" :key="'l'+i" x="35" :y="gridLines[i]+4" text-anchor="end" fill="#64748b" font-size="10">{{ label }}</text>
-      <!-- Area -->
-      <path v-if="points.length > 1" :d="areaPath" fill="url(#areaGrad)" opacity="0.3" />
-      <!-- Line -->
-      <path v-if="points.length > 1" :d="linePath" fill="none" stroke="#3b82f6" stroke-width="2" />
-      <!-- Dots -->
-      <circle v-for="(p, i) in points" :key="i" :cx="p.x" :cy="p.y" r="3" fill="#3b82f6" />
-      <!-- X axis labels -->
-      <text v-for="(p, i) in xLabels" :key="'x'+i" :x="p.x" :y="height-2" text-anchor="middle" fill="#64748b" font-size="9">{{ p.label }}</text>
-      <!-- Gradient -->
-      <defs>
-        <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.5" />
-          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
-        </linearGradient>
-      </defs>
-    </svg>
-    <p v-if="!data.length" class="empty">暂无趋势数据</p>
+  <div class="chart-container">
+    <h2>情绪趋势</h2>
+    <div class="chart" ref="chartRef">
+      <svg :width="width" :height="height">
+        <!-- Grid lines -->
+        <line v-for="y in gridY" :key="'g-'+y" x1="40" :y1="y" :x2="width-10" :y2="y" stroke="#eee" />
+        <!-- Y-axis labels -->
+        <text v-for="(label, i) in yLabels" :key="'yl-'+i" x="5" :y="gridY[i]+4" font-size="10" fill="#999">{{ label }}</text>
+        <!-- Zero line -->
+        <line :x1="40" :y1="zeroY" :x2="width-10" :y2="zeroY" stroke="#ccc" stroke-dasharray="4" />
+        <!-- Data line -->
+        <polyline
+          v-if="points.length > 1"
+          :points="pointsStr"
+          fill="none"
+          stroke="#3498db"
+          stroke-width="2"
+        />
+        <!-- Data dots -->
+        <circle v-for="(p, i) in points" :key="'d-'+i" :cx="p.x" :cy="p.y" r="3" :fill="dotColor(p.raw)" />
+      </svg>
+    </div>
+    <div v-if="!trend.length" class="empty">暂无趋势数据</div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 
-const props = defineProps({ data: { type: Array, default: () => [] } })
+const props = defineProps({
+  trend: { type: Array, default: () => [] }
+})
+
+const chartRef = ref(null)
 const width = ref(600)
-const height = ref(200)
-const container = ref(null)
+const height = ref(250)
 
-const margin = { top: 10, right: 10, bottom: 25, left: 40 }
-const plotW = computed(() => width.value - margin.left - margin.right)
-const plotH = computed(() => height.value - margin.top - margin.bottom)
+const padding = { top: 20, right: 10, bottom: 30, left: 40 }
 
-const points = computed(() => {
-  if (!props.data.length) return []
-  return props.data.map((d, i) => ({
-    x: margin.left + (i / Math.max(props.data.length - 1, 1)) * plotW.value,
-    y: margin.top + (1 - (d.avg_score + 1) / 2) * plotH.value,
-    ...d,
-  }))
+function resize() {
+  if (chartRef.value) {
+    width.value = Math.max(chartRef.value.clientWidth, 300)
+  }
+}
+
+onMounted(() => {
+  resize()
+  window.addEventListener('resize', resize)
 })
+onUnmounted(() => window.removeEventListener('resize', resize))
 
-const linePath = computed(() => {
-  if (points.value.length < 2) return ''
-  return points.value.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-})
-
-const areaPath = computed(() => {
-  if (points.value.length < 2) return ''
-  const base = margin.top + plotH.value
-  return linePath.value + ` L ${points.value[points.value.length - 1].x} ${base} L ${points.value[0].x} ${base} Z`
-})
-
-const gridLines = computed(() => {
-  const step = plotH.value / 4
-  return [0, 1, 2, 3, 4].map(i => margin.top + i * step)
+const gridY = computed(() => {
+  const ys = []
+  for (let i = 0; i <= 4; i++) {
+    ys.push(padding.top + (i * (height.value - padding.top - padding.bottom)) / 4)
+  }
+  return ys
 })
 
 const yLabels = computed(() => ['+1.0', '+0.5', '0.0', '-0.5', '-1.0'])
 
-const xLabels = computed(() => {
-  if (!points.value.length) return []
-  const step = Math.max(1, Math.floor(points.value.length / 6))
-  return points.value.filter((_, i) => i % step === 0).map(p => ({
-    x: p.x,
-    label: (p.time_bucket || '').slice(5, 16),
-  }))
+const zeroY = computed(() => {
+  return padding.top + (height.value - padding.top - padding.bottom) * 0.5
 })
 
-let resizeObserver = null
-onMounted(() => {
-  if (container.value) {
-    width.value = container.value.clientWidth
-    resizeObserver = new ResizeObserver(entries => {
-      width.value = entries[0].contentRect.width
-    })
-    resizeObserver.observe(container.value)
-  }
+const points = computed(() => {
+  if (!props.trend.length) return []
+  const chartW = width.value - padding.left - padding.right
+  const chartH = height.value - padding.top - padding.bottom
+  return props.trend.map((item, i) => {
+    const score = item.avg_score ?? item.score ?? 0
+    const x = padding.left + (i / Math.max(props.trend.length - 1, 1)) * chartW
+    const y = padding.top + (1 - (score + 1) / 2) * chartH
+    return { x, y, raw: score }
+  })
 })
-onUnmounted(() => { if (resizeObserver) resizeObserver.disconnect() })
+
+const pointsStr = computed(() => points.value.map(p => `${p.x},${p.y}`).join(' '))
+
+function dotColor(score) {
+  if (score < -0.3) return '#e74c3c'
+  if (score > 0.3) return '#27ae60'
+  return '#f39c12'
+}
 </script>
 
 <style scoped>
-.chart-container { width: 100%; }
-.empty { color: #64748b; font-size: 13px; text-align: center; padding: 40px 0; }
+.chart-container {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.chart-container h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.chart {
+  overflow-x: auto;
+}
+.empty {
+  text-align: center;
+  color: #999;
+  padding: 24px;
+}
 </style>

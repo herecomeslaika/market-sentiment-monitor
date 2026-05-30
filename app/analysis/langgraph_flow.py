@@ -6,6 +6,9 @@ from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 2
+RETRY_DELAY = 2.0
+
 
 class AnalysisState(TypedDict, total=False):
     news_title: str
@@ -18,6 +21,7 @@ class AnalysisState(TypedDict, total=False):
     risk_assessment: str
     final_report: str
     error: str | None
+    retry_count: int
 
 
 SYSTEM_PROMPT = (
@@ -37,44 +41,71 @@ def _get_client():
     return _cached_client
 
 
+async def _retry_analyze(client, system_prompt: str, user_prompt: str, timeout: int = 30, retries: int = MAX_RETRIES) -> str:
+    """Call DeepSeek with retry logic."""
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            result = await asyncio.wait_for(
+                client.analyze(system_prompt, user_prompt),
+                timeout=timeout,
+            )
+            return result
+        except asyncio.TimeoutError:
+            last_error = "timeout"
+            logger.warning("DeepSeek call timed out (attempt %d/%d)", attempt + 1, retries + 1)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("DeepSeek call failed (attempt %d/%d): %s", attempt + 1, retries + 1, e)
+
+        if attempt < retries:
+            await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
+    raise RuntimeError(f"DeepSeek call failed after {retries + 1} attempts: {last_error}")
+
+
 async def search_web_context(state: AnalysisState) -> dict:
-    """Search the web for related context using aiohttp to query a search API."""
+    """Search the web for related context using DuckDuckGo HTML search."""
     keywords = state.get("keywords_matched", [])
     title = state.get("news_title", "")
     query = title if title else " ".join(keywords[:3])
 
     import aiohttp
-    from app import deps
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            # Use DuckDuckGo HTML search as a free search source
-            params = {"q": f"{query} 财经", "kl": "cn-zh"}
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                ),
-            }
-            async with session.get(
-                "https://html.duckduckgo.com/html/",
-                params=params,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    return {"web_context": ""}
-                html = await resp.text()
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                params = {"q": f"{query} 财经", "kl": "cn-zh"}
+                headers = {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    ),
+                }
+                async with session.get(
+                    "https://html.duckduckgo.com/html/",
+                    params=params,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        if attempt < MAX_RETRIES:
+                            await asyncio.sleep(1)
+                            continue
+                        return {"web_context": ""}
+                    html = await resp.text()
 
-                # Extract result snippets from HTML
-                import re
-                snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
-                snippets = [re.sub(r"<[^>]+>", "", s).strip() for s in snippets[:5]]
-                web_context = "\n".join(f"- {s}" for s in snippets if s)
-                return {"web_context": web_context}
-    except Exception as e:
-        logger.warning("Web search failed: %s", e)
-        return {"web_context": ""}
+                    import re
+                    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+                    snippets = [re.sub(r"<[^>]+>", "", s).strip() for s in snippets[:5]]
+                    web_context = "\n".join(f"- {s}" for s in snippets if s)
+                    return {"web_context": web_context}
+        except Exception as e:
+            logger.warning("Web search failed (attempt %d/%d): %s", attempt + 1, MAX_RETRIES + 1, e)
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(1)
+
+    return {"web_context": ""}
 
 
 async def gather_context(state: AnalysisState) -> dict:
@@ -91,15 +122,11 @@ async def gather_context(state: AnalysisState) -> dict:
         "请总结这条新闻的市场背景和潜在影响。"
     )
     try:
-        result = await asyncio.wait_for(
-            client.analyze(SYSTEM_PROMPT, user_prompt),
-            timeout=30,
-        )
+        result = await _retry_analyze(client, SYSTEM_PROMPT, user_prompt)
         return {"context_summary": result}
-    except asyncio.TimeoutError:
-        return {"context_summary": "分析超时", "error": "gather_context timeout"}
     except Exception as e:
-        return {"context_summary": f"分析失败: {e}", "error": str(e)}
+        logger.error("gather_context failed: %s", e)
+        return {"context_summary": f"背景分析不可用: {e}", "error": str(e)}
 
 
 async def assess_risk(state: AnalysisState) -> dict:
@@ -113,38 +140,31 @@ async def assess_risk(state: AnalysisState) -> dict:
         "请评估风险等级（高/中/低），并提供可操作的交易建议。"
     )
     try:
-        result = await asyncio.wait_for(
-            client.analyze(SYSTEM_PROMPT, user_prompt),
-            timeout=30,
-        )
+        result = await _retry_analyze(client, SYSTEM_PROMPT, user_prompt)
         return {"risk_assessment": result}
-    except asyncio.TimeoutError:
-        return {"risk_assessment": "风险评估超时", "error": "assess_risk timeout"}
     except Exception as e:
-        return {"risk_assessment": f"风险评估失败: {e}", "error": str(e)}
+        logger.error("assess_risk failed: %s", e)
+        return {"risk_assessment": f"风险评估不可用: {e}", "error": str(e)}
 
 
 async def compose_report(state: AnalysisState) -> dict:
-    if state.get("error"):
-        return {"final_report": f"分析不完整: {state.get('error', 'unknown error')}"}
-
     client = _get_client()
+    has_error = state.get("error")
+    error_note = "\n注意：部分分析步骤未完成，研报可能不完整。" if has_error else ""
+
     user_prompt = (
         f"新闻：{state.get('news_title', '')}\n"
         f"情绪：{state.get('sentiment_score', 0)} ({state.get('sentiment_label', '')})\n"
-        f"市场背景：{state.get('context_summary', '')}\n"
-        f"风险评估：{state.get('risk_assessment', '')}\n\n"
+        f"市场背景：{state.get('context_summary', '（不可用）')}\n"
+        f"风险评估：{state.get('risk_assessment', '（不可用）')}\n"
+        f"{error_note}\n\n"
         "请将以上内容整合为一份简洁的研报，包含：1) 事件概述 2) 市场影响 3) 风险等级 4) 操作建议。"
     )
     try:
-        result = await asyncio.wait_for(
-            client.analyze(SYSTEM_PROMPT, user_prompt),
-            timeout=30,
-        )
+        result = await _retry_analyze(client, SYSTEM_PROMPT, user_prompt)
         return {"final_report": result}
-    except asyncio.TimeoutError:
-        return {"final_report": "研报生成超时", "error": "compose_report timeout"}
     except Exception as e:
+        logger.error("compose_report failed: %s", e)
         return {"final_report": f"研报生成失败: {e}", "error": str(e)}
 
 

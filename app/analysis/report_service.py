@@ -3,30 +3,39 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
+from uuid import uuid4
 
 from app import deps
-from app.models import AlertPayload
+from app.models import AlertPayload, NewsItem, SentimentResult
 
 logger = logging.getLogger(__name__)
 
-# In-memory report store: report_id -> AlertPayload
-_report_store: dict[str, AlertPayload] = {}
+MAX_RETRIES = 2
+RETRY_DELAY = 1.0
 
 
-def store_report(alert: AlertPayload) -> str:
-    report_id = f"r_{id(alert)}_{int(datetime.now().timestamp())}"
-    _report_store[report_id] = alert
+async def store_report(alert: AlertPayload) -> str:
+    report_id = f"r_{uuid4().hex[:12]}"
+    from app.repository import save_report
+    await save_report(
+        report_id, alert,
+        news_id=alert.sentiment.news_db_id,
+        sentiment_id=alert.sentiment.sentiment_db_id,
+    )
     return report_id
 
 
-def get_report(report_id: str) -> AlertPayload | None:
-    return _report_store.get(report_id)
+async def get_report(report_id: str) -> dict | None:
+    from app.repository import load_report
+    row = await load_report(report_id)
+    if not row:
+        return None
+    return row
 
 
-async def followup_question(report_id: str, question: str) -> str | None:
-    """Ask a follow-up question about an existing report."""
-    alert = get_report(report_id)
-    if not alert or not alert.deep_analysis:
+async def followup_question(report_id: str, question: str, retries: int = MAX_RETRIES) -> str | None:
+    report = await get_report(report_id)
+    if not report or not report.get("deep_analysis"):
         return None
 
     from app.analysis.deepseek_client import DeepSeekClient
@@ -37,55 +46,67 @@ async def followup_question(report_id: str, question: str) -> str | None:
         "请基于已有研报内容回答问题，如果问题超出研报范围，可以补充新的分析。使用中文回答。"
     )
     user_prompt = (
-        f"原始新闻：{alert.news_item.title}\n"
-        f"情绪得分：{alert.sentiment.score} ({alert.sentiment.label})\n"
-        f"已有研报：\n{alert.deep_analysis}\n\n"
+        f"原始新闻：{report.get('news_title', '')}\n"
+        f"情绪得分：{report.get('sentiment_score', 0)} ({report.get('sentiment_label', '')})\n"
+        f"已有研报：\n{report['deep_analysis']}\n\n"
         f"用户追问：{question}"
     )
 
-    try:
-        result = await asyncio.wait_for(
-            client.analyze(system_prompt, user_prompt),
-            timeout=30,
-        )
-        return result
-    except Exception as e:
-        logger.error("Follow-up question error: %s", e)
-        return None
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            result = await asyncio.wait_for(
+                client.analyze(system_prompt, user_prompt),
+                timeout=30,
+            )
+            return result
+        except asyncio.TimeoutError:
+            last_error = "timeout"
+            logger.warning("Follow-up question timed out (attempt %d/%d)", attempt + 1, retries + 1)
+        except Exception as e:
+            last_error = str(e)
+            logger.warning("Follow-up question error (attempt %d/%d): %s", attempt + 1, retries + 1, e)
+
+        if attempt < retries:
+            await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
+    logger.error("Follow-up question failed after %d attempts: %s", retries + 1, last_error)
+    return None
 
 
-def export_markdown(report_id: str) -> str | None:
-    """Export a report as Markdown."""
-    alert = get_report(report_id)
-    if not alert:
+def export_markdown(report: dict) -> str | None:
+    if not report:
         return None
 
     lines = [
-        f"# {alert.news_item.title}",
+        f"# {report.get('news_title', '未知标题')}",
         "",
-        f"**来源**: {alert.news_item.source}  ",
-        f"**情绪得分**: {alert.sentiment.score:.3f} ({alert.sentiment.label})  ",
-        f"**置信度**: {alert.sentiment.confidence:.3f}  ",
-        f"**告警级别**: {alert.alert_level}  ",
-        f"**触发关键词**: {', '.join(alert.triggered_keywords)}  ",
-        f"**时间**: {alert.created_at.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"**来源**: {report.get('news_source', '')}  ",
+        f"**情绪得分**: {report.get('sentiment_score', 0):.3f} ({report.get('sentiment_label', '')})  ",
+        f"**置信度**: {report.get('sentiment_confidence', 0):.3f}  ",
+        f"**告警级别**: {report.get('alert_level', '')}  ",
+        f"**触发关键词**: {', '.join(report.get('triggered_keywords', []))}  ",
+        f"**时间**: {report.get('created_at', '')}",
         "",
     ]
 
-    if alert.news_item.url:
-        lines.append(f"**链接**: [{alert.news_item.url}]({alert.news_item.url})")
+    url = report.get("news_url", "")
+    if url:
+        lines.append(f"**链接**: [{url}]({url})")
         lines.append("")
 
-    if alert.news_item.content_snippet:
+    snippet = report.get("news_snippet", "")
+    if snippet:
         lines.append("## 新闻摘要")
         lines.append("")
-        lines.append(alert.news_item.content_snippet)
+        lines.append(snippet)
         lines.append("")
 
-    if alert.deep_analysis:
+    deep = report.get("deep_analysis", "")
+    if deep:
         lines.append("## 深度研报")
         lines.append("")
-        lines.append(alert.deep_analysis)
+        lines.append(deep)
         lines.append("")
 
     lines.append("---")
@@ -95,15 +116,13 @@ def export_markdown(report_id: str) -> str | None:
 
 
 async def multi_model_compare(report_id: str) -> dict | None:
-    """Run a second model analysis for cross-validation (uses same DeepSeek with different temperature)."""
-    alert = get_report(report_id)
-    if not alert:
+    report = await get_report(report_id)
+    if not report:
         return None
 
     from app.analysis.deepseek_client import DeepSeekClient
     from config.settings import Settings
 
-    # Create a second client with higher temperature for diverse perspective
     settings = Settings(
         deepseek_api_key=deps.settings.deepseek_api_key,
         deepseek_model=deps.settings.deepseek_model,
@@ -114,10 +133,10 @@ async def multi_model_compare(report_id: str) -> dict | None:
 
     system_prompt = "你是一位持相反立场的分析师（魔鬼代言人），请从相反角度审视这条新闻的市场影响。使用中文回答。"
     user_prompt = (
-        f"新闻：{alert.news_item.title}\n"
-        f"摘要：{alert.news_item.content_snippet}\n"
-        f"情绪：{alert.sentiment.score} ({alert.sentiment.label})\n"
-        f"已有研报：{alert.deep_analysis or '无'}\n\n"
+        f"新闻：{report.get('news_title', '')}\n"
+        f"摘要：{report.get('news_snippet', '')}\n"
+        f"情绪：{report.get('sentiment_score', 0)} ({report.get('sentiment_label', '')})\n"
+        f"已有研报：{report.get('deep_analysis', '无')}\n\n"
         "请提供相反视角的分析。"
     )
 
@@ -128,8 +147,8 @@ async def multi_model_compare(report_id: str) -> dict | None:
         )
         return {
             "contrarian_view": result,
-            "original_score": alert.sentiment.score,
-            "original_label": alert.sentiment.label,
+            "original_score": report.get("sentiment_score"),
+            "original_label": report.get("sentiment_label"),
         }
     except Exception as e:
         logger.error("Multi-model compare error: %s", e)

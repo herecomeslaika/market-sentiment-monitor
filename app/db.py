@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS reports (
     alert_level TEXT NOT NULL DEFAULT 'warning',
     triggered_keywords TEXT DEFAULT '',
     deep_analysis TEXT DEFAULT NULL,
+    -- Redundant fields for independent queries
+    news_title TEXT DEFAULT '',
+    news_source TEXT DEFAULT '',
+    news_url TEXT DEFAULT '',
+    news_snippet TEXT DEFAULT '',
+    sentiment_score REAL DEFAULT 0.0,
+    sentiment_label TEXT DEFAULT '',
+    sentiment_confidence REAL DEFAULT 0.0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -78,9 +86,33 @@ async def init_db() -> aiosqlite.Connection:
     _db = await aiosqlite.connect(str(DB_PATH))
     _db.row_factory = aiosqlite.Row
     await _db.executescript(SCHEMA)
+    await _migrate(_db)
     await _db.commit()
     logger.info("Database initialized at %s", DB_PATH)
     return _db
+
+
+async def _migrate(db: aiosqlite.Connection):
+    """Add columns to existing tables if they're missing."""
+    # reports: add redundant fields for independent queries
+    cols = await _get_columns(db, "reports")
+    if "news_title" not in cols:
+        for col, col_type in [
+            ("news_title", "TEXT DEFAULT ''"),
+            ("news_source", "TEXT DEFAULT ''"),
+            ("news_url", "TEXT DEFAULT ''"),
+            ("news_snippet", "TEXT DEFAULT ''"),
+            ("sentiment_score", "REAL DEFAULT 0.0"),
+            ("sentiment_label", "TEXT DEFAULT ''"),
+            ("sentiment_confidence", "REAL DEFAULT 0.0"),
+        ]:
+            await db.execute(f"ALTER TABLE reports ADD COLUMN {col} {col_type}")
+        logger.info("Migrated reports table: added redundant fields")
+
+
+async def _get_columns(db: aiosqlite.Connection, table: str) -> set[str]:
+    rows = await db.execute_fetchall(f"PRAGMA table_info({table})")
+    return {row[1] for row in rows}
 
 
 async def get_db() -> aiosqlite.Connection:
