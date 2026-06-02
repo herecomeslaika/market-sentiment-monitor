@@ -22,7 +22,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
-const props = defineProps({ apiBase: { type: String, default: '/api' } })
+const props = defineProps({ apiBase: { type: String, default: '' } })
 const emit = defineEmits(['select'])
 
 const entities = ref([])

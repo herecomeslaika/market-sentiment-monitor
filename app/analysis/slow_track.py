@@ -20,12 +20,14 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _semaphore
 
 
-def should_trigger_deep_analysis(score: float, matched_keywords: list[str]) -> bool:
+def should_trigger_deep_analysis(score: float, matched_keywords: list[str], significance: float = 0.0) -> bool:
     if not matched_keywords:
         return False
     for sub in deps.active_subscriptions.values():
         if score <= sub.threshold:
             return True
+    if significance >= 0.7:
+        return True
     return False
 
 
@@ -75,23 +77,8 @@ async def slow_track_consumer():
                 news_item=sentiment.news_item,
                 sentiment=sentiment,
             )
-            matched = match_subscriptions(alert)
-            if not matched:
-                continue
 
-            triggered_keywords = []
-            for sub, keywords in matched:
-                triggered_keywords.extend(keywords)
-            alert.triggered_keywords = list(set(triggered_keywords))
-
-            if sentiment.score <= -0.7:
-                alert.alert_level = "critical"
-            elif sentiment.score <= -0.4:
-                alert.alert_level = "warning"
-            else:
-                alert.alert_level = "info"
-
-            # --- Enhanced pipeline: entity extraction + multi-sentiment + event clustering ---
+            # --- Always run intelligent analysis regardless of subscriptions ---
             entities = []
             multi_sentiment_result = None
             cluster = None
@@ -108,9 +95,6 @@ async def slow_track_consumer():
                         sentiment.news_item.content_snippet,
                         sentiment.news_item.title_hash,
                     )
-                    if entities:
-                        alert.triggered_keywords.extend([e.name for e in entities])
-                        alert.triggered_keywords = list(set(alert.triggered_keywords))
                 except Exception as e:
                     logger.warning("Entity extraction failed: %s", e)
 
@@ -152,6 +136,71 @@ async def slow_track_consumer():
                     )
                 except Exception as e:
                     logger.warning("Knowledge graph extraction failed: %s", e)
+
+            # Broadcast entity/event/momentum updates via WebSocket
+            if entities:
+                try:
+                    from app.ws.connection_manager import get_manager
+                    mgr = get_manager()
+                    await mgr.broadcast({
+                        "type": "entity_update",
+                        "payload": {
+                            "news_id": sentiment.news_db_id,
+                            "entities": [{"name": e.name, "type": e.type} for e in entities],
+                        },
+                    })
+                except Exception:
+                    pass
+
+            if cluster:
+                try:
+                    from app.ws.connection_manager import get_manager
+                    mgr = get_manager()
+                    await mgr.broadcast({
+                        "type": "event_update",
+                        "payload": {
+                            "cluster_id": cluster.cluster_id,
+                            "title": cluster.title,
+                            "news_count": len(cluster.news_ids),
+                            "significance": cluster.significance,
+                        },
+                    })
+                except Exception:
+                    pass
+
+            if multi_sentiment_result and multi_sentiment_result.momentum_shift:
+                try:
+                    from app.ws.connection_manager import get_manager
+                    mgr = get_manager()
+                    await mgr.broadcast({
+                        "type": "momentum_shift",
+                        "payload": {
+                            "news_id": sentiment.news_db_id,
+                            "entity": multi_sentiment_result.entity_name,
+                            "momentum": multi_sentiment_result.momentum,
+                            "dominant": multi_sentiment_result.dominant,
+                        },
+                    })
+                except Exception:
+                    pass
+
+            # --- Subscription matching and alerting (only if subscribed) ---
+            matched = match_subscriptions(alert)
+            if not matched:
+                continue
+
+            # Assign alert level based on sentiment score
+            if sentiment.score <= -0.7:
+                alert.alert_level = "critical"
+            elif sentiment.score <= -0.3:
+                alert.alert_level = "warning"
+            else:
+                alert.alert_level = "info"
+
+            triggered_keywords = []
+            for sub, keywords in matched:
+                triggered_keywords.extend(keywords)
+            alert.triggered_keywords = list(set(triggered_keywords))
 
             # Step 5: Deep analysis (enhanced with knowledge)
             if should_trigger_deep_analysis(sentiment.score, triggered_keywords, cluster.significance if cluster else 0.0):
@@ -212,53 +261,6 @@ async def slow_track_consumer():
                 sentiment.score, alert.alert_level, triggered_keywords,
                 len(entities), sentiment.news_item.title[:40],
             )
-
-            # Broadcast entity/event/momentum updates via WebSocket
-            if entities:
-                try:
-                    from app.ws.connection_manager import get_manager
-                    mgr = get_manager()
-                    await mgr.broadcast({
-                        "type": "entity_update",
-                        "payload": {
-                            "news_id": sentiment.news_db_id,
-                            "entities": [{"name": e.name, "type": e.type} for e in entities],
-                        },
-                    })
-                except Exception:
-                    pass
-
-            if cluster:
-                try:
-                    from app.ws.connection_manager import get_manager
-                    mgr = get_manager()
-                    await mgr.broadcast({
-                        "type": "event_update",
-                        "payload": {
-                            "cluster_id": cluster.cluster_id,
-                            "title": cluster.title,
-                            "news_count": len(cluster.news_ids),
-                            "significance": cluster.significance,
-                        },
-                    })
-                except Exception:
-                    pass
-
-            if multi_sentiment_result and multi_sentiment_result.momentum_shift:
-                try:
-                    from app.ws.connection_manager import get_manager
-                    mgr = get_manager()
-                    await mgr.broadcast({
-                        "type": "momentum_shift",
-                        "payload": {
-                            "news_id": sentiment.news_db_id,
-                            "entity": multi_sentiment_result.entity_name,
-                            "momentum": multi_sentiment_result.momentum,
-                            "dominant": multi_sentiment_result.dominant,
-                        },
-                    })
-                except Exception:
-                    pass
 
         except asyncio.CancelledError:
             raise

@@ -52,7 +52,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 
-const props = defineProps({ apiBase: { type: String, default: '/api' } })
+const props = defineProps({ apiBase: { type: String, default: '' } })
 const dims = ['fear', 'greed', 'optimism', 'uncertainty']
 const dimLabels = { fear: '恐惧', greed: '贪婪', optimism: '乐观', uncertainty: '不确定性' }
 

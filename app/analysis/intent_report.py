@@ -117,19 +117,6 @@ async def crawl_fresh_news(keywords: list[str]) -> list[dict]:
             })
     return matched
 
-    # Filter items matching any keyword
-    matched = []
-    for item in all_items:
-        text = (item.title + " " + (item.content_snippet or "")).lower()
-        if any(kw.lower() in text for kw in keywords):
-            matched.append({
-                "title": item.title,
-                "source": item.source,
-                "url": item.url,
-                "content_snippet": item.content_snippet,
-            })
-    return matched[:10]
-
 
 async def generate_analysis(intent: str, news_items: list[dict]) -> str | None:
     """Run LangGraph-style analysis on the gathered news, enriched with entity/relation data."""
