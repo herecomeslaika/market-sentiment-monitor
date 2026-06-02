@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS reports (
     alert_level TEXT NOT NULL DEFAULT 'warning',
     triggered_keywords TEXT DEFAULT '',
     deep_analysis TEXT DEFAULT NULL,
+    referenced_news TEXT DEFAULT '[]',
     -- Redundant fields for independent queries
     news_title TEXT DEFAULT '',
     news_source TEXT DEFAULT '',
@@ -74,6 +75,71 @@ CREATE INDEX IF NOT EXISTS idx_sentiment_processed ON sentiment(processed_at);
 CREATE INDEX IF NOT EXISTS idx_alerts_level ON alerts(alert_level);
 CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at);
+
+CREATE TABLE IF NOT EXISTS entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    aliases TEXT DEFAULT '[]',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, type)
+);
+
+CREATE TABLE IF NOT EXISTS news_entities (
+    news_id INTEGER NOT NULL REFERENCES news(id),
+    entity_id INTEGER NOT NULL REFERENCES entities(id),
+    PRIMARY KEY(news_id, entity_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_clusters (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    entities_json TEXT DEFAULT '[]',
+    news_ids_json TEXT DEFAULT '[]',
+    sentiment_avg REAL DEFAULT 0.0,
+    sentiment_distribution TEXT DEFAULT '{}',
+    first_seen TIMESTAMP,
+    last_seen TIMESTAMP,
+    significance REAL DEFAULT 0.0,
+    alert_sent INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS multi_sentiment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    news_id INTEGER NOT NULL REFERENCES news(id),
+    entity_name TEXT DEFAULT '',
+    fear REAL DEFAULT 0.0,
+    greed REAL DEFAULT 0.0,
+    optimism REAL DEFAULT 0.0,
+    uncertainty REAL DEFAULT 0.0,
+    dominant TEXT DEFAULT 'neutral',
+    momentum REAL DEFAULT 0.0,
+    momentum_shift INTEGER DEFAULT 0,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS entity_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_entity TEXT NOT NULL,
+    target_entity TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    context TEXT DEFAULT '',
+    confidence REAL DEFAULT 0.5,
+    news_id INTEGER REFERENCES news(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_entity, target_entity, relation, news_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+CREATE INDEX IF NOT EXISTS idx_news_entities_news ON news_entities(news_id);
+CREATE INDEX IF NOT EXISTS idx_news_entities_entity ON news_entities(entity_id);
+CREATE INDEX IF NOT EXISTS idx_event_clusters_significance ON event_clusters(significance);
+CREATE INDEX IF NOT EXISTS idx_multi_sentiment_entity ON multi_sentiment(entity_name);
+CREATE INDEX IF NOT EXISTS idx_multi_sentiment_processed ON multi_sentiment(processed_at);
+CREATE INDEX IF NOT EXISTS idx_relations_source ON entity_relations(source_entity);
+CREATE INDEX IF NOT EXISTS idx_relations_target ON entity_relations(target_entity);
 """
 
 # Module-level connection (set at startup, closed at shutdown)
@@ -108,6 +174,9 @@ async def _migrate(db: aiosqlite.Connection):
         ]:
             await db.execute(f"ALTER TABLE reports ADD COLUMN {col} {col_type}")
         logger.info("Migrated reports table: added redundant fields")
+    if "referenced_news" not in cols:
+        await db.execute("ALTER TABLE reports ADD COLUMN referenced_news TEXT DEFAULT '[]'")
+        logger.info("Migrated reports table: added referenced_news column")
 
 
 async def _get_columns(db: aiosqlite.Connection, table: str) -> set[str]:

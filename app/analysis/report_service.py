@@ -14,13 +14,17 @@ MAX_RETRIES = 2
 RETRY_DELAY = 1.0
 
 
-async def store_report(alert: AlertPayload) -> str:
+async def store_report(alert: AlertPayload, referenced_news: list[dict] | None = None) -> str:
     report_id = f"r_{uuid4().hex[:12]}"
     from app.repository import save_report
+    ref = referenced_news or []
+    if not ref and alert.news_item.url:
+        ref = [{"title": alert.news_item.title, "source": alert.news_item.source, "url": alert.news_item.url}]
     await save_report(
         report_id, alert,
         news_id=alert.sentiment.news_db_id,
         sentiment_id=alert.sentiment.sentiment_db_id,
+        referenced_news=ref,
     )
     return report_id
 

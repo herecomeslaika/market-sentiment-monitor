@@ -93,34 +93,64 @@ class TestDeepAnalysisTrigger:
 class TestRunDeepAnalysis:
     @pytest.mark.asyncio
     async def test_run_deep_analysis_timeout(self):
-        from app.analysis.slow_track import run_deep_analysis
-        sentiment = _make_sentiment()
+        from app.analysis.slow_track import run_deep_analysis_from_state
+        state = {
+            "news_title": "美联储降息",
+            "news_snippet": "",
+            "sentiment_score": -0.8,
+            "sentiment_label": "negative",
+            "keywords_matched": ["美联储"],
+            "context_summary": "",
+            "risk_assessment": "",
+            "final_report": "",
+            "error": None,
+        }
 
         with patch("app.analysis.langgraph_flow.get_compiled_graph") as mock_graph:
             mock_compiled = AsyncMock()
             mock_compiled.ainvoke.side_effect = asyncio.TimeoutError()
             mock_graph.return_value = mock_compiled
 
-            result = await run_deep_analysis(sentiment, retries=0)
+            result = await run_deep_analysis_from_state(state, retries=0)
             assert result is None
 
     @pytest.mark.asyncio
     async def test_run_deep_analysis_exception(self):
-        from app.analysis.slow_track import run_deep_analysis
-        sentiment = _make_sentiment()
+        from app.analysis.slow_track import run_deep_analysis_from_state
+        state = {
+            "news_title": "美联储降息",
+            "news_snippet": "",
+            "sentiment_score": -0.8,
+            "sentiment_label": "negative",
+            "keywords_matched": ["美联储"],
+            "context_summary": "",
+            "risk_assessment": "",
+            "final_report": "",
+            "error": None,
+        }
 
         with patch("app.analysis.langgraph_flow.get_compiled_graph") as mock_graph:
             mock_compiled = AsyncMock()
             mock_compiled.ainvoke.side_effect = RuntimeError("API error")
             mock_graph.return_value = mock_compiled
 
-            result = await run_deep_analysis(sentiment, retries=0)
+            result = await run_deep_analysis_from_state(state, retries=0)
             assert result is None
 
     @pytest.mark.asyncio
     async def test_run_deep_analysis_success(self):
-        from app.analysis.slow_track import run_deep_analysis
-        sentiment = _make_sentiment()
+        from app.analysis.slow_track import run_deep_analysis_from_state
+        state = {
+            "news_title": "美联储降息",
+            "news_snippet": "",
+            "sentiment_score": -0.8,
+            "sentiment_label": "negative",
+            "keywords_matched": ["美联储"],
+            "context_summary": "",
+            "risk_assessment": "",
+            "final_report": "",
+            "error": None,
+        }
 
         with patch("app.analysis.langgraph_flow.get_compiled_graph") as mock_graph:
             mock_compiled = AsyncMock()
@@ -130,13 +160,23 @@ class TestRunDeepAnalysis:
             }
             mock_graph.return_value = mock_compiled
 
-            result = await run_deep_analysis(sentiment, retries=0)
+            result = await run_deep_analysis_from_state(state, retries=0)
             assert result == "这是一份研报"
 
     @pytest.mark.asyncio
     async def test_run_deep_analysis_partial_report(self):
-        from app.analysis.slow_track import run_deep_analysis
-        sentiment = _make_sentiment()
+        from app.analysis.slow_track import run_deep_analysis_from_state
+        state = {
+            "news_title": "美联储降息",
+            "news_snippet": "",
+            "sentiment_score": -0.8,
+            "sentiment_label": "negative",
+            "keywords_matched": ["美联储"],
+            "context_summary": "",
+            "risk_assessment": "",
+            "final_report": "",
+            "error": None,
+        }
 
         with patch("app.analysis.langgraph_flow.get_compiled_graph") as mock_graph:
             mock_compiled = AsyncMock()
@@ -146,5 +186,5 @@ class TestRunDeepAnalysis:
             }
             mock_graph.return_value = mock_compiled
 
-            result = await run_deep_analysis(sentiment, retries=0)
+            result = await run_deep_analysis_from_state(state, retries=0)
             assert result == "部分研报"

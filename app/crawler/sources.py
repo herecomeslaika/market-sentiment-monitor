@@ -7,6 +7,8 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
+from xml.etree import ElementTree
 
 import aiohttp
 
@@ -124,6 +126,46 @@ def default_sources() -> dict[str, SourceConfig]:
             params={"per_page": "20", "page": "1"},
             headers={**BROWSER_HEADERS, "Referer": "https://36kr.com/newsflashes"},
             parser="kr36",
+        ),
+        # ---------- Overseas Sources ----------
+        "cnbc_top": SourceConfig(
+            name="CNBC",
+            url="https://search.cnbc.com/rs/search/combinedcms/view.xml",
+            params={"partnerId": "wrss01", "id": "10001147"},
+            headers=BROWSER_HEADERS,
+            parser="rss",
+        ),
+        "cnbc_asia": SourceConfig(
+            name="CNBC-Asia",
+            url="https://search.cnbc.com/rs/search/combinedcms/view.xml",
+            params={"partnerId": "wrss01", "id": "19854910"},
+            headers=BROWSER_HEADERS,
+            parser="rss",
+        ),
+        "marketwatch": SourceConfig(
+            name="MarketWatch",
+            url="https://feeds.content.dowjones.io/public/rss/mw_topstories",
+            headers=BROWSER_HEADERS,
+            parser="rss",
+        ),
+        "yahoo_finance": SourceConfig(
+            name="Yahoo-Finance",
+            url="https://feeds.finance.yahoo.com/rss/2.0/headline",
+            params={"s": "^GSPC", "region": "US", "lang": "en-US"},
+            headers=BROWSER_HEADERS,
+            parser="rss",
+        ),
+        "bbc_business": SourceConfig(
+            name="BBC-Business",
+            url="https://feeds.bbci.co.uk/news/business/rss.xml",
+            headers=BROWSER_HEADERS,
+            parser="rss",
+        ),
+        "investing_crypto": SourceConfig(
+            name="Investing-Crypto",
+            url="https://www.investing.com/rss/news_301.rss",
+            headers={**BROWSER_HEADERS, "Referer": "https://www.investing.com/"},
+            parser="rss",
         ),
     }
 
@@ -299,12 +341,52 @@ def parse_kr36(text: str, source_name: str) -> list[NewsItem]:
     return items
 
 
+def parse_rss(text: str, source_name: str) -> list[NewsItem]:
+    """Generic RSS 2.0 parser for overseas news sources."""
+    items = []
+    try:
+        root = ElementTree.fromstring(text)
+        # Handle RSS namespace variants
+        channel = root.find("channel")
+        if channel is None:
+            channel = root
+        for item in channel.findall("item"):
+            title_el = item.find("title")
+            link_el = item.find("link")
+            desc_el = item.find("description")
+            date_el = item.find("pubDate")
+
+            title = (title_el.text or "").strip() if title_el is not None else ""
+            if not title:
+                continue
+            link = (link_el.text or "").strip() if link_el is not None else ""
+            desc = (desc_el.text or "").strip() if desc_el is not None else ""
+            published_at = None
+            if date_el is not None and date_el.text:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    published_at = parsedate_to_datetime(date_el.text.strip())
+                except Exception:
+                    pass
+
+            items.append(NewsItem(
+                source=source_name, title=title, url=link,
+                content_snippet=_clean_html(desc),
+                title_hash=compute_title_hash(title),
+                published_at=published_at or datetime.now(),
+            ))
+    except Exception as e:
+        logger.warning("RSS parse error for %s: %s", source_name, e)
+    return items
+
+
 _PARSERS = {
     "sina": parse_sina,
     "cls": parse_cls,
     "eastmoney": parse_eastmoney,
     "jin10": parse_jin10,
     "kr36": parse_kr36,
+    "rss": parse_rss,
 }
 
 

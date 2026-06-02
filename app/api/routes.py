@@ -174,6 +174,22 @@ class FollowupRequest(BaseModel):
     question: str
 
 
+class GenerateReportRequest(BaseModel):
+    intent: str
+    hours: int = 168
+
+
+@router.post("/reports/generate")
+async def generate_report(body: GenerateReportRequest):
+    from app.analysis.intent_report import run
+    result = await run(body.intent, body.hours)
+    if result and result.get("error"):
+        return result
+    if not result:
+        raise HTTPException(500, "Report generation failed")
+    return result
+
+
 @router.get("/reports")
 async def list_reports(limit: int = 20, offset: int = 0, level: str | None = None):
     from app.repository import query_reports
@@ -246,3 +262,110 @@ async def set_notification_prefs(user_id: str, body: NotificationPrefsBody):
     }
     _set(user_id, prefs)
     return {"status": "updated", "user_id": user_id}
+
+
+# ---------- Entities ----------
+
+@router.get("/entities")
+async def list_entities(limit: int = 20):
+    from app.repository import query_hot_entities
+    return await query_hot_entities(limit)
+
+
+@router.get("/entities/{name}/timeline")
+async def entity_timeline(name: str, hours: int = 168):
+    from app.repository import query_entity_timeline
+    return await query_entity_timeline(name, hours)
+
+
+# ---------- Events ----------
+
+@router.get("/events")
+async def list_events(limit: int = 20, offset: int = 0):
+    from app.repository import query_event_clusters
+    return await query_event_clusters(limit, offset)
+
+
+@router.get("/events/{cluster_id}")
+async def get_event(cluster_id: str):
+    from app.repository import load_recent_clusters
+    clusters = await load_recent_clusters(hours=720)
+    for c in clusters:
+        if c.cluster_id == cluster_id:
+            return {
+                "cluster_id": c.cluster_id,
+                "title": c.title,
+                "entities": [{"name": e.name, "type": e.type} for e in c.entities],
+                "news_ids": c.news_ids,
+                "sentiment_avg": c.sentiment_avg,
+                "sentiment_distribution": c.sentiment_distribution,
+                "significance": c.significance,
+                "first_seen": c.first_seen,
+                "last_seen": c.last_seen,
+            }
+    raise HTTPException(404, "Event cluster not found")
+
+
+# ---------- Multi-Sentiment ----------
+
+@router.get("/sentiment/multi")
+async def multi_sentiment_history(hours: int = 24, limit: int = 50):
+    from app.repository import query_multi_sentiment_history
+    return await query_multi_sentiment_history(hours, limit)
+
+
+@router.get("/sentiment/momentum")
+async def momentum_shifts(hours: int = 24, limit: int = 20):
+    from app.repository import query_momentum_shifts
+    return await query_momentum_shifts(hours, limit)
+
+
+@router.get("/sentiment/entity/{name}")
+async def entity_multi_sentiment(name: str, hours: int = 168):
+    from app.repository import query_entity_multi_sentiment
+    return await query_entity_multi_sentiment(name, hours)
+
+
+# ---------- Knowledge Graph ----------
+
+@router.get("/knowledge/relations")
+async def list_relations(entity: str | None = None, limit: int = 50):
+    from app.repository import query_entity_relations
+    return await query_entity_relations(entity, limit)
+
+
+@router.get("/knowledge/relations/{entity_name}")
+async def entity_relations(entity_name: str, limit: int = 50):
+    from app.repository import query_entity_relations
+    return await query_entity_relations(entity_name, limit)
+
+
+class CausalChainRequest(BaseModel):
+    entities: list[str]
+
+
+@router.post("/knowledge/causal-chain")
+async def infer_causal_chain(body: CausalChainRequest):
+    from app.repository import load_relations_for_context
+    from app.analysis.knowledge_graph import infer_causal_chain as _infer
+    from app.models import Entity, EntityRelation
+
+    relations_data = await load_relations_for_context(body.entities)
+    if not relations_data:
+        return {"causal_chain": None, "message": "No relations found for given entities"}
+
+    entities = [Entity(name=n, type="unknown") for n in body.entities]
+    relations = [EntityRelation(**r) for r in relations_data]
+
+    chain = await _infer(entities, relations, "用户查询因果链")
+    if not chain:
+        return {"causal_chain": None, "message": "Could not infer causal chain"}
+
+    return {
+        "causal_chain": {
+            "trigger": chain.trigger,
+            "path": chain.path,
+            "impact": chain.impact,
+            "confidence": chain.confidence,
+        }
+    }

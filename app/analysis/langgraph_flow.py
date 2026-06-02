@@ -13,6 +13,7 @@ RETRY_DELAY = 2.0
 class AnalysisState(TypedDict, total=False):
     news_title: str
     news_snippet: str
+    news_url: str
     sentiment_score: float
     sentiment_label: str
     keywords_matched: list[str]
@@ -22,6 +23,11 @@ class AnalysisState(TypedDict, total=False):
     final_report: str
     error: str | None
     retry_count: int
+    entities: list[dict]
+    multi_sentiment: dict
+    event_context: dict
+    relations: list[dict]
+    causal_chain: dict
 
 
 SYSTEM_PROMPT = (
@@ -113,13 +119,38 @@ async def gather_context(state: AnalysisState) -> dict:
     web_ctx = state.get("web_context", "")
     web_section = f"\n网络搜索参考：\n{web_ctx}" if web_ctx else ""
 
+    entity_info = ""
+    if state.get("entities"):
+        entity_lines = [f"- {e['name']}({e['type']})" for e in state["entities"]]
+        entity_info = "\n相关实体:\n" + "\n".join(entity_lines)
+    relation_info = ""
+    if state.get("relations"):
+        relation_lines = [f"- {r['source']} --[{r['relation']}]--> {r['target']}" for r in state["relations"]]
+        relation_info = "\n实体关系:\n" + "\n".join(relation_lines)
+    causal_info = ""
+    if state.get("causal_chain"):
+        cc = state["causal_chain"]
+        causal_info = f"\n因果推理: {cc['trigger']} → {' → '.join(cc['path'])} → {cc['impact']} (置信度: {cc['confidence']})"
+    sentiment_info = ""
+    if state.get("multi_sentiment"):
+        ms = state["multi_sentiment"]
+        sentiment_info = f"\n多维情绪: 恐惧={ms['fear']}, 贪婪={ms['greed']}, 乐观={ms['optimism']}, 不确定性={ms['uncertainty']}, 主导={ms['dominant']}"
+    event_info = ""
+    if state.get("event_context"):
+        ec = state["event_context"]
+        event_info = f"\n事件聚合: {ec['cluster_title']} (相关新闻{ec['news_count']}条, 重要性{ec['significance']})"
+
     user_prompt = (
         f"新闻标题：{state.get('news_title', '')}\n"
         f"新闻摘要：{state.get('news_snippet', '')}\n"
         f"情绪得分：{state.get('sentiment_score', 0)} ({state.get('sentiment_label', '')})\n"
         f"匹配关键词：{', '.join(state.get('keywords_matched', []))}\n"
-        f"{web_section}\n\n"
-        "请总结这条新闻的市场背景和潜在影响。"
+        f"{web_section}{entity_info}{relation_info}{causal_info}{sentiment_info}{event_info}\n\n"
+        "请综合以上信息，提供深入的背景分析，包括：\n"
+        "1. 事件背景和来龙去脉\n"
+        "2. 涉及的核心实体及其关系\n"
+        "3. 可能的因果传导路径\n"
+        "4. 对市场各板块的潜在影响"
     )
     try:
         result = await _retry_analyze(client, SYSTEM_PROMPT, user_prompt)
@@ -152,13 +183,36 @@ async def compose_report(state: AnalysisState) -> dict:
     has_error = state.get("error")
     error_note = "\n注意：部分分析步骤未完成，研报可能不完整。" if has_error else ""
 
+    entity_info = ""
+    if state.get("entities"):
+        entity_lines = [f"- {e['name']}({e['type']})" for e in state["entities"]]
+        entity_info = "\n核心实体:\n" + "\n".join(entity_lines)
+    causal_info = ""
+    if state.get("causal_chain"):
+        cc = state["causal_chain"]
+        causal_info = f"\n因果传导链: {cc['trigger']} → {' → '.join(cc['path'])} → {cc['impact']}"
+    sentiment_info = ""
+    if state.get("multi_sentiment"):
+        ms = state["multi_sentiment"]
+        sentiment_info = f"\n多维情绪分析: 恐惧={ms['fear']}, 贪婪={ms['greed']}, 乐观={ms['optimism']}, 不确定性={ms['uncertainty']}, 主导情绪={ms['dominant']}"
+    news_url_note = ""
+    if state.get("news_url"):
+        news_url_note = f"\n新闻原文链接: {state['news_url']}"
+
     user_prompt = (
         f"新闻：{state.get('news_title', '')}\n"
         f"情绪：{state.get('sentiment_score', 0)} ({state.get('sentiment_label', '')})\n"
         f"市场背景：{state.get('context_summary', '（不可用）')}\n"
         f"风险评估：{state.get('risk_assessment', '（不可用）')}\n"
-        f"{error_note}\n\n"
-        "请将以上内容整合为一份简洁的研报，包含：1) 事件概述 2) 市场影响 3) 风险等级 4) 操作建议。"
+        f"{entity_info}{causal_info}{sentiment_info}{news_url_note}{error_note}\n\n"
+        "请基于以上所有分析，撰写一份完整的金融分析研报，包含：\n"
+        "1. 事件概述（含涉及的核心实体）\n"
+        "2. 因果传导路径分析\n"
+        "3. 多维情绪研判\n"
+        "4. 对各市场板块的影响预判\n"
+        "5. 风险提示与投资建议\n"
+        "6. 后续关注重点\n"
+        "7. 在研报末尾添加「参考来源」部分，列出所有引用的新闻原文链接"
     )
     try:
         result = await _retry_analyze(client, SYSTEM_PROMPT, user_prompt)

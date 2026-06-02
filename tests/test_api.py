@@ -149,3 +149,36 @@ class TestReportEndpoints:
     async def test_compare_nonexistent(self, client):
         resp = await client.post("/reports/nonexistent/compare")
         assert resp.status_code == 404
+
+    async def test_list_reports(self, client):
+        resp = await client.get("/reports")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    async def test_generate_report_missing_body(self, client):
+        resp = await client.post("/reports/generate")
+        assert resp.status_code == 422
+
+    async def test_generate_report_no_news(self, client):
+        from unittest.mock import AsyncMock, patch
+        with patch("app.analysis.intent_report.extract_keywords", new_callable=AsyncMock, return_value=["不存在的关键词"]), \
+             patch("app.analysis.intent_report.search_recent_news", new_callable=AsyncMock, return_value=[]), \
+             patch("app.analysis.intent_report.crawl_fresh_news", new_callable=AsyncMock, return_value=[]):
+            resp = await client.post("/reports/generate", json={"intent": "不存在的主题", "hours": 24})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "error" in data
+
+    async def test_generate_report_success(self, client):
+        from unittest.mock import AsyncMock, patch
+        mock_news = [{"title": "央行降息", "source": "test", "url": "", "content_snippet": "降息了", "score": -0.5, "label": "negative", "confidence": 0.9}]
+        with patch("app.analysis.intent_report.extract_keywords", new_callable=AsyncMock, return_value=["降息"]), \
+             patch("app.analysis.intent_report.search_recent_news", new_callable=AsyncMock, return_value=mock_news), \
+             patch("app.analysis.intent_report.generate_analysis", new_callable=AsyncMock, return_value="这是一份测试研报"), \
+             patch("app.repository.save_report", new_callable=AsyncMock):
+            resp = await client.post("/reports/generate", json={"intent": "降息对银行股的影响", "hours": 24})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["report_id"].startswith("r_")
+            assert data["news_count"] == 1
+            assert data["deep_analysis"] == "这是一份测试研报"

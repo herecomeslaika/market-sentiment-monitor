@@ -1,6 +1,21 @@
 <template>
   <div class="report-browser">
     <h2>历史报告</h2>
+
+    <!-- Intent input -->
+    <div class="intent-bar">
+      <input
+        v-model="intentText"
+        placeholder="输入研究意图，如：降息对银行股的影响"
+        @keyup.enter="generateReport"
+        :disabled="generating"
+      />
+      <button class="btn-generate" @click="generateReport" :disabled="generating || !intentText.trim()">
+        {{ generating ? '生成中...' : '生成研报' }}
+      </button>
+    </div>
+    <div v-if="generateError" class="generate-error">{{ generateError }}</div>
+
     <div class="toolbar">
       <select v-model="levelFilter" @change="fetchReports">
         <option value="">全部级别</option>
@@ -65,6 +80,16 @@
         <h4>深度研报</h4>
         <div class="analysis-text">{{ selectedReport.deep_analysis }}</div>
       </div>
+      <div v-if="selectedReport.referenced_news?.length" class="detail-references">
+        <h4>参考来源</h4>
+        <ul class="ref-list">
+          <li v-for="(ref, idx) in selectedReport.referenced_news" :key="idx">
+            <span class="ref-source">[{{ ref.source }}]</span>
+            <span class="ref-title">{{ ref.title }}</span>
+            <a v-if="ref.url" :href="ref.url" target="_blank" class="ref-link">查看原文</a>
+          </li>
+        </ul>
+      </div>
 
       <!-- Action buttons -->
       <div class="detail-actions">
@@ -105,6 +130,9 @@ const loading = ref(false)
 const followupQuestion = ref('')
 const followupAnswer = ref('')
 const contrarianView = ref('')
+const intentText = ref('')
+const generating = ref(false)
+const generateError = ref('')
 
 async function fetchReports() {
   try {
@@ -207,7 +235,46 @@ async function askFollowup() {
   }
 }
 
+async function generateReport() {
+  if (!intentText.value.trim()) return
+  generating.value = true
+  generateError.value = ''
+  try {
+    const res = await fetch('/reports/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intent: intentText.value }),
+    })
+    const data = await res.json()
+    if (data.error) {
+      generateError.value = data.error
+      return
+    }
+    // Refresh list and open the new report
+    await fetchReports()
+    selectedReport.value = {
+      id: data.report_id,
+      alert_level: data.alert_level,
+      triggered_keywords: data.keywords,
+      deep_analysis: data.deep_analysis,
+      news_title: data.news_title,
+      news_source: data.news_source,
+      created_at: data.created_at,
+      sentiment_score: 0,
+      sentiment_label: 'neutral',
+      sentiment_confidence: 0,
+    }
+    intentText.value = ''
+  } catch (e) {
+    generateError.value = '生成失败: ' + e.message
+  } finally {
+    generating.value = false
+  }
+}
+
 onMounted(fetchReports)
+
+defineExpose({ openReport })
 </script>
 
 <style scoped>
@@ -220,6 +287,40 @@ onMounted(fetchReports)
 .report-browser h2 {
   margin: 0 0 12px;
   font-size: 18px;
+}
+.intent-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.intent-bar input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.intent-bar input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 2px rgba(52,152,219,0.15);
+}
+.btn-generate {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #3498db;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-generate:hover { background: #2980b9; }
+.btn-generate:disabled { opacity: 0.5; cursor: default; }
+.generate-error {
+  color: #e74c3c;
+  font-size: 13px;
+  margin-bottom: 8px;
 }
 .toolbar {
   display: flex;

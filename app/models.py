@@ -49,3 +49,48 @@ class SubscriptionCommand(BaseModel):
     action: str  # "subscribe" | "unsubscribe"
     keywords: list[str] = Field(default_factory=list)
     threshold: float = -0.5
+
+
+class Entity(BaseModel):
+    name: str
+    type: str  # company | industry | policy | indicator | person
+    aliases: list[str] = []
+
+
+class EventCluster(BaseModel):
+    cluster_id: str
+    title: str
+    entities: list[Entity]
+    news_ids: list[int]
+    sentiment_avg: float
+    sentiment_distribution: dict
+    first_seen: datetime
+    last_seen: datetime
+    significance: float = 0.0
+
+
+class MultiSentiment(BaseModel):
+    news_id: int
+    entity_name: str = ""
+    fear: float = 0.0
+    greed: float = 0.0
+    optimism: float = 0.0
+    uncertainty: float = 0.0
+    dominant: str = "neutral"
+    momentum: float = 0.0
+    momentum_shift: bool = False
+
+
+class EntityRelation(BaseModel):
+    source: str
+    target: str
+    relation: str  # affects | belongs_to | causes | correlates
+    context: str = ""
+    confidence: float = 0.5
+
+
+class CausalChain(BaseModel):
+    trigger: str
+    path: list[str]
+    impact: str
+    confidence: float
