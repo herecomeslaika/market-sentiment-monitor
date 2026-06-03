@@ -131,6 +131,19 @@ CREATE TABLE IF NOT EXISTS entity_relations (
     UNIQUE(source_entity, target_entity, relation, news_id)
 );
 
+CREATE TABLE IF NOT EXISTS fed_policy_summary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    summary TEXT NOT NULL,
+    rate_trend TEXT DEFAULT '',
+    policy_stance TEXT DEFAULT '',
+    qt_qe_status TEXT DEFAULT '',
+    key_events TEXT DEFAULT '[]',
+    news_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fed_policy_created ON fed_policy_summary(created_at);
+
 CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_news_entities_news ON news_entities(news_id);

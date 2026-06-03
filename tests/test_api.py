@@ -174,3 +174,33 @@ class TestNotificationEndpoints:
     async def test_set_notification_prefs(self, api_client):
         resp = await api_client.put("/notifications/u1", json={"silence_minutes": 30, "min_level": "warning"})
         assert resp.status_code == 200
+
+
+class TestFedPolicyEndpoints:
+    @pytest.mark.asyncio
+    async def test_fed_policy_no_data(self, api_client):
+        with patch("app.analysis.fed_policy.get_fed_policy", return_value={"rate_trend": "no data", "summary": "no data", "policy_stance": "", "qt_qe_status": "", "key_events": [], "outlook": "", "sources": [], "news_count": 0}):
+            resp = await api_client.get("/fed-policy")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "rate_trend" in data
+
+    @pytest.mark.asyncio
+    async def test_fed_policy_refresh(self, api_client):
+        mock_result = {
+            "rate_trend": "cutting", "policy_stance": "dovish", "qt_qe_status": "QT ongoing",
+            "summary": "美联储进入降息周期", "key_events": ["FOMC signals rate cut"],
+            "outlook": "预计继续降息", "sources": ["CNBC"], "news_count": 5,
+        }
+        with patch("app.analysis.fed_policy.get_fed_policy", return_value=mock_result):
+            resp = await api_client.get("/fed-policy?refresh=true")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["rate_trend"] == "cutting"
+
+    @pytest.mark.asyncio
+    async def test_fed_policy_news(self, api_client):
+        with patch("app.analysis.fed_policy.search_fed_news", return_value=[]):
+            resp = await api_client.get("/fed-policy/news")
+            assert resp.status_code == 200
+            assert isinstance(resp.json(), list)

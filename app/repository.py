@@ -669,3 +669,58 @@ async def query_entity_relations(entity_name: str | None = None, limit: int = 50
             (limit,),
         )
     return [dict(row) for row in rows]
+
+
+# ---------- Fed Policy Persistence ----------
+
+async def save_fed_policy_summary(summary: dict) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        """INSERT INTO fed_policy_summary (summary, rate_trend, policy_stance, qt_qe_status, key_events, news_count)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            summary.get("summary", ""),
+            summary.get("rate_trend", ""),
+            summary.get("policy_stance", ""),
+            summary.get("qt_qe_status", ""),
+            json.dumps(summary.get("key_events", []), ensure_ascii=False),
+            summary.get("news_count", 0),
+        ),
+    )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def load_latest_fed_policy(max_age_hours: int = 1) -> dict | None:
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        """SELECT * FROM fed_policy_summary
+           WHERE created_at >= datetime('now', ?)
+           ORDER BY created_at DESC LIMIT 1""",
+        (f"-{max_age_hours} hours",),
+    )
+    if not rows:
+        return None
+    r = dict(rows[0])
+    try:
+        r["key_events"] = json.loads(r.get("key_events", "[]"))
+    except (json.JSONDecodeError, TypeError):
+        r["key_events"] = []
+    return r
+
+
+async def query_fed_policy_history(limit: int = 10) -> list[dict]:
+    db = await get_db()
+    rows = await db.execute_fetchall(
+        """SELECT * FROM fed_policy_summary ORDER BY created_at DESC LIMIT ?""",
+        (limit,),
+    )
+    results = []
+    for row in rows:
+        r = dict(row)
+        try:
+            r["key_events"] = json.loads(r.get("key_events", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            r["key_events"] = []
+        results.append(r)
+    return results

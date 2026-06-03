@@ -9,6 +9,9 @@
     <div class="intent-section">
       <IntentSearch @view-report="onViewReport" />
     </div>
+    <div class="fed-policy-section">
+      <FedPolicy @generate-report="onFedGenerateReport" />
+    </div>
     <div class="intelligence-row">
       <div class="intel-card">
         <EntityCloud @select="onEntitySelect" />
@@ -57,6 +60,7 @@ import EntityCloud from './components/EntityCloud.vue'
 import EventTimeline from './components/EventTimeline.vue'
 import MultiSentimentRadar from './components/MultiSentimentRadar.vue'
 import KnowledgeGraph from './components/KnowledgeGraph.vue'
+import FedPolicy from './components/FedPolicy.vue'
 
 const news = ref([])
 const sentiments = ref([])
@@ -99,6 +103,15 @@ function onEventSelect(event) {
     })
   }
   document.querySelector('.reports-section')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+function onFedGenerateReport(intent) {
+  const input = document.querySelector('.intent-search input')
+  if (input) {
+    input.value = intent
+    input.dispatchEvent(new Event('input'))
+  }
+  document.querySelector('.intent-section')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 let ws = null

@@ -48,6 +48,26 @@ async def status():
     }
 
 
+# ---------- Fed Policy ----------
+
+@router.get("/fed-policy")
+async def get_fed_policy(refresh: bool = False):
+    """Get current Fed monetary policy summary. Set refresh=true to force regeneration."""
+    from app.analysis.fed_policy import get_fed_policy as _get
+    result = await _get(refresh=refresh)
+    if not result:
+        raise HTTPException(500, "Failed to generate Fed policy summary")
+    return result
+
+
+@router.get("/fed-policy/news")
+async def get_fed_news(limit: int = 20):
+    """Get recent Fed-related news."""
+    from app.analysis.fed_policy import search_fed_news
+    news = await search_fed_news(hours=168)
+    return news[:limit]
+
+
 # ---------- Subscriptions ----------
 
 @router.post("/subscriptions", response_model=Subscription)
