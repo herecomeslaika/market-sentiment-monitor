@@ -124,22 +124,45 @@ async def query_alert_history(limit: int = 50, offset: int = 0, level: str | Non
     return [dict(row) for row in rows]
 
 
-async def query_sentiment_trend(hours: int = 24, interval_minutes: int = 30):
+async def query_sentiment_trend(hours: int = 24):
+    """Hourly sentiment aggregation with distribution stats and 5-point MA."""
     db = await get_db()
     rows = await db.execute_fetchall(
         """SELECT
-             strftime('%Y-%m-%d %H:%M', processed_at) as time_bucket,
+             strftime('%Y-%m-%d %H:00', processed_at) as time_bucket,
              AVG(score) as avg_score,
-             COUNT(*) as count,
+             COUNT(*) as news_count,
              MIN(score) as min_score,
-             MAX(score) as max_score
+             MAX(score) as max_score,
+             SUM(CASE WHEN score > 0.3 THEN 1 ELSE 0 END) as pos_count,
+             SUM(CASE WHEN score < -0.3 THEN 1 ELSE 0 END) as neg_count,
+             SUM(CASE WHEN score BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) as neutral_count
            FROM sentiment
            WHERE processed_at >= datetime('now', ?)
            GROUP BY time_bucket
            ORDER BY time_bucket""",
         (f"-{hours} hours",),
     )
-    return [dict(row) for row in rows]
+    data = [dict(row) for row in rows]
+
+    # Compute 5-point moving average
+    for i in range(len(data)):
+        window = data[max(0, i - 2):i + 3]
+        data[i]["ma_score"] = sum(d["avg_score"] for d in window) / len(window)
+
+    # Attach momentum shift events
+    shifts = await db.execute_fetchall(
+        """SELECT ms.entity_name, ms.dominant, n.title, ms.processed_at
+           FROM multi_sentiment ms
+           JOIN news n ON n.id = ms.news_id
+           WHERE ms.momentum_shift = 1
+           AND ms.processed_at >= datetime('now', ?)
+           ORDER BY ms.processed_at""",
+        (f"-{hours} hours",),
+    )
+    data_momentum = [dict(r) for r in shifts]
+
+    return {"trend": data, "momentum_shifts": data_momentum}
 
 
 async def query_keyword_stats(hours: int = 24):

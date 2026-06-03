@@ -140,7 +140,8 @@ async def news_history(limit: int = 50, offset: int = 0, source: str | None = No
 @router.get("/sentiment/trend")
 async def sentiment_trend(hours: int = 24):
     from app.repository import query_sentiment_trend
-    return await query_sentiment_trend(hours)
+    data = await query_sentiment_trend(hours)
+    return data
 
 
 @router.get("/sentiment/history")

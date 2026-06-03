@@ -22,7 +22,7 @@
     </div>
     <div class="grid">
       <div class="chart-area">
-        <SentimentChart :trend="trend" />
+        <SentimentChart :trend="trend" :momentum-shifts="momentumShifts" />
       </div>
       <div class="sidebar">
         <KeywordStats :keywords="keywords" />
@@ -62,6 +62,7 @@ const news = ref([])
 const sentiments = ref([])
 const alerts = ref([])
 const trend = ref([])
+const momentumShifts = ref([])
 const keywords = ref([])
 const subscription = ref(null)
 const wsConnected = ref(false)
@@ -128,12 +129,13 @@ async function fetchData() {
     const [newsRes, sentRes, trendRes, kwRes] = await Promise.all([
       fetch('/news/history?limit=50').then(r => r.json()),
       fetch('/sentiment/history?hours=24').then(r => r.json()),
-      fetch('/sentiment/trend').then(r => r.json()),
+      fetch('/sentiment/trend?hours=72').then(r => r.json()),
       fetch('/stats/keywords').then(r => r.json()),
     ])
     if (Array.isArray(newsRes)) news.value = newsRes
     if (Array.isArray(sentRes)) sentiments.value = sentRes
-    if (Array.isArray(trendRes)) trend.value = trendRes
+    if (Array.isArray(trendRes.trend)) trend.value = trendRes.trend
+    if (Array.isArray(trendRes.momentum_shifts)) momentumShifts.value = trendRes.momentum_shifts
     if (Array.isArray(kwRes)) keywords.value = kwRes
   } catch (e) {
     console.error('Failed to fetch data:', e)
@@ -164,6 +166,43 @@ function connectWS() {
         news.value = [data.payload, ...news.value].slice(0, 100)
       } else if (data.type === 'sentiment') {
         sentiments.value = [data.payload, ...sentiments.value].slice(0, 100)
+        // Live trend update: append to current hour bucket or create new
+        const p = data.payload
+        const now = new Date()
+        const bucket = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:00`
+        const last = trend.value[trend.value.length - 1]
+        const score = p.score ?? 0
+        if (last && last.time_bucket === bucket) {
+          // Update existing bucket
+          const cnt = (last.news_count || last.count || 0) + 1
+          const prevAvg = last.avg_score ?? 0
+          const prevCnt = last.news_count || last.count || 0
+          last.avg_score = (prevAvg * prevCnt + score) / cnt
+          last.news_count = cnt
+          if (score > 0.3) last.pos_count = (last.pos_count || 0) + 1
+          else if (score < -0.3) last.neg_count = (last.neg_count || 0) + 1
+          else last.neutral_count = (last.neutral_count || 0) + 1
+          if (score < (last.min_score ?? 1)) last.min_score = score
+          if (score > (last.max_score ?? -1)) last.max_score = score
+        } else {
+          // New hour bucket
+          const newBucket = {
+            time_bucket: bucket,
+            avg_score: score,
+            news_count: 1,
+            min_score: score,
+            max_score: score,
+            pos_count: score > 0.3 ? 1 : 0,
+            neg_count: score < -0.3 ? 1 : 0,
+            neutral_count: (score >= -0.3 && score <= 0.3) ? 1 : 0,
+          }
+          trend.value.push(newBucket)
+        }
+        // Recompute MA for last 5 points
+        for (let i = Math.max(0, trend.value.length - 5); i < trend.value.length; i++) {
+          const window = trend.value.slice(Math.max(0, i - 2), i + 3)
+          trend.value[i].ma_score = window.reduce((s, d) => s + (d.avg_score ?? 0), 0) / window.length
+        }
       } else if (data.type === 'alert') {
         alerts.value = [formatAlert(data.payload), ...alerts.value].slice(0, 50)
       } else if (data.type === 'entity_update') {
