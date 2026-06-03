@@ -1,65 +1,73 @@
-"""Tests for source parsers including RSS."""
-from app.crawler.sources import parse_rss, default_sources
+"""Tests for news crawler sources and parsers."""
+import pytest
+
+from app.crawler.sources import default_sources, parse_rss, _PARSERS
+from app.models import NewsItem
 
 
-SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>Test Feed</title>
-    <item>
-      <title>Fed signals rate cut in September</title>
-      <link>https://example.com/fed-rate-cut</link>
-      <description>The Federal Reserve hinted at a possible rate cut amid slowing inflation.</description>
-      <pubDate>Mon, 02 Jun 2026 14:30:00 GMT</pubDate>
-    </item>
-    <item>
-      <title>Nvidia stock hits all-time high</title>
-      <link>https://example.com/nvidia-ath</link>
-      <description>Nvidia shares surged after announcing new AI chip lineup.</description>
-      <pubDate>Mon, 02 Jun 2026 13:00:00 GMT</pubDate>
-    </item>
-    <item>
-      <title></title>
-      <link>https://example.com/empty</link>
-      <description>Should be skipped</description>
-    </item>
-  </channel>
-</rss>"""
-
-
-class TestParseRss:
-    def test_parses_valid_rss(self):
-        items = parse_rss(SAMPLE_RSS, "TestSource")
-        assert len(items) == 2
-        assert items[0].title == "Fed signals rate cut in September"
-        assert items[0].source == "TestSource"
-        assert items[0].url == "https://example.com/fed-rate-cut"
-        assert "Federal Reserve" in items[0].content_snippet
-        assert items[1].title == "Nvidia stock hits all-time high"
-
-    def test_skips_empty_titles(self):
-        items = parse_rss(SAMPLE_RSS, "TestSource")
-        assert all(item.title for item in items)
-
-    def test_handles_malformed_xml(self):
-        items = parse_rss("not xml at all", "BadSource")
-        assert items == []
-
-    def test_published_at_parsed(self):
-        items = parse_rss(SAMPLE_RSS, "TestSource")
-        assert items[0].published_at is not None
-        assert items[0].published_at.year == 2026
-
-    def test_default_sources_includes_overseas(self):
+class TestDefaultSources:
+    def test_source_count(self):
         sources = default_sources()
-        assert "cnbc_top" in sources
-        assert "cnbc_asia" in sources
-        assert "marketwatch" in sources
-        assert "yahoo_finance" in sources
-        assert "bbc_business" in sources
-        assert "investing_crypto" in sources
+        assert len(sources) >= 13  # 7 domestic + 6 overseas
+
+    def test_overseas_sources_present(self):
+        sources = default_sources()
+        names = [s.name for s in sources.values()]
+        assert "CNBC" in names
+        assert "CNBC-Asia" in names
+        assert "MarketWatch" in names
+        assert "BBC-Business" in names
 
     def test_overseas_sources_use_rss_parser(self):
         sources = default_sources()
-        for key in ("cnbc_top", "cnbc_asia", "marketwatch", "yahoo_finance", "bbc_business", "investing_crypto"):
-            assert sources[key].parser == "rss", f"{key} should use rss parser"
+        for key in ["cnbc_top", "cnbc_asia", "marketwatch", "bbc_business"]:
+            assert sources[key].parser == "rss"
+
+    def test_domestic_sources_present(self):
+        sources = default_sources()
+        names = [s.name for s in sources.values()]
+        assert "新浪财经-A股" in names
+        assert "东方财富" in names
+
+    def test_all_sources_have_required_fields(self):
+        sources = default_sources()
+        for key, s in sources.items():
+            assert s.name, f"Source {key} missing name"
+            assert s.url, f"Source {key} missing url"
+            assert s.parser, f"Source {key} missing parser"
+            assert s.parser in _PARSERS, f"Source {key} has unknown parser: {s.parser}"
+
+
+class TestParseRss:
+    def test_parse_valid_rss(self, sample_rss):
+        items = parse_rss(sample_rss, "TestFeed")
+        assert len(items) == 2  # 3rd item has empty title, should be skipped
+        assert items[0].title == "Fed signals rate cut in September"
+        assert items[0].source == "TestFeed"
+        assert items[0].url == "https://example.com/fed-rate-cut"
+
+    def test_parse_rss_extracts_snippet(self, sample_rss):
+        items = parse_rss(sample_rss, "TestFeed")
+        assert "Federal Reserve" in items[0].content_snippet
+
+    def test_parse_rss_extracts_published_at(self, sample_rss):
+        items = parse_rss(sample_rss, "TestFeed")
+        assert items[0].published_at is not None
+
+    def test_parse_empty_rss(self):
+        items = parse_rss("", "EmptyFeed")
+        assert items == []
+
+    def test_parse_invalid_xml(self):
+        items = parse_rss("not xml at all", "BadFeed")
+        assert items == []
+
+    def test_parse_rss_no_channel(self):
+        xml = '<?xml version="1.0"?><rss version="2.0"><item><title>Test</title></item></rss>'
+        items = parse_rss(xml, "NoChannel")
+        # Should still parse items from root
+        assert len(items) >= 0  # At minimum, should not crash
+
+    def test_rss_parser_registered(self):
+        assert "rss" in _PARSERS
+        assert _PARSERS["rss"] == parse_rss

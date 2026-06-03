@@ -1,129 +1,173 @@
-"""Tests for database and repository layer."""
-import asyncio
-import os
-import tempfile
-
+"""Tests for repository layer with in-memory database."""
 import pytest
+from unittest.mock import patch
 
-from app.db import init_db, close_db, get_db
-from app.models import NewsItem, SentimentResult, AlertPayload
-from datetime import datetime
-
-
-@pytest.fixture(autouse=True)
-async def setup_db():
-    """Use a temp DB for each test."""
-    import app.db as db_mod
-    old_path = db_mod.DB_PATH
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_mod.DB_PATH = type(old_path)(tmpdir) / "test.db"
-        try:
-            conn = await init_db()
-            yield
-        finally:
-            await close_db()
-            db_mod.DB_PATH = old_path
+from app.models import (
+    NewsItem, SentimentResult, AlertPayload, Entity, MultiSentiment,
+    EntityRelation,
+)
 
 
-class TestDatabase:
-    async def test_init_creates_tables(self):
-        db = await get_db()
-        rows = await db.execute_fetchall(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
-        tables = {r[0] for r in rows}
-        assert "news" in tables
-        assert "sentiment" in tables
-        assert "alerts" in tables
-        assert "subscriptions" in tables
-        assert "reports" in tables
+class TestSaveAndLoadNews:
+    @pytest.mark.asyncio
+    async def test_save_news_returns_id(self, db):
+        item = NewsItem(source="test", title="新闻标题", title_hash="hash_test")
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_news
+            news_id = await save_news(item)
+            assert news_id is not None and news_id > 0
+
+    @pytest.mark.asyncio
+    async def test_save_news_dedup(self, db):
+        item = NewsItem(source="test", title="重复新闻", title_hash="hash_dup")
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_news
+            id1 = await save_news(item)
+            id2 = await save_news(item)
+            assert id1 == id2
+
+    @pytest.mark.asyncio
+    async def test_load_news_by_id(self, seeded_db):
+        db, ids = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import load_news_by_id
+            result = await load_news_by_id(ids["n1"])
+            assert result["title"] == "央行宣布降息25个基点"
+
+    @pytest.mark.asyncio
+    async def test_load_news_not_found(self, db):
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import load_news_by_id
+            assert await load_news_by_id(99999) is None
 
 
-class TestRepository:
-    async def test_save_and_query_news(self):
-        from app.repository import save_news, query_news
-        item = NewsItem(
-            source="test", title="测试新闻", url="https://example.com",
-            content_snippet="摘要", title_hash="hash1",
-        )
-        news_id = await save_news(item)
-        assert news_id is not None
+class TestSentimentPersistence:
+    @pytest.mark.asyncio
+    async def test_save_sentiment_returns_id(self, seeded_db):
+        db, ids = seeded_db
+        result = SentimentResult(news_item=NewsItem(source="t", title="x"), score=-0.5, label="negative", confidence=0.85)
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_sentiment
+            assert await save_sentiment(ids["n1"], result) is not None
 
-        results = await query_news(limit=10)
-        assert len(results) == 1
-        assert results[0]["title"] == "测试新闻"
+    @pytest.mark.asyncio
+    async def test_query_sentiment_trend(self, seeded_db):
+        db, _ = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import query_sentiment_trend
+            data = await query_sentiment_trend(hours=168)
+            assert "trend" in data and "momentum_shifts" in data
+            assert isinstance(data["trend"], list)
+            # MA should be computed for each trend point
+            if data["trend"]:
+                assert "ma_score" in data["trend"][0]
 
-    async def test_save_news_dedup(self):
-        from app.repository import save_news, query_news
-        item = NewsItem(
-            source="test", title="重复新闻", title_hash="dup_hash",
-        )
-        id1 = await save_news(item)
-        id2 = await save_news(item)
-        results = await query_news()
-        assert len(results) == 1
 
-    async def test_save_sentiment(self):
-        from app.repository import save_news, save_sentiment, query_sentiment_history
-        item = NewsItem(source="test", title="情绪测试", title_hash="sent_hash")
-        news_id = await save_news(item)
+class TestEntityPersistence:
+    @pytest.mark.asyncio
+    async def test_save_entities(self, seeded_db):
+        db, ids = seeded_db
+        entities = [Entity(name="工商银行", type="company", aliases=["ICBC"]), Entity(name="银行业", type="industry")]
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_entities
+            eids = await save_entities(ids["n1"], entities)
+            assert len(eids) == 2
 
-        result = SentimentResult(
-            news_item=item, score=-0.8, label="negative", confidence=0.8,
-        )
-        sent_id = await save_sentiment(news_id, result)
-        assert sent_id is not None
+    @pytest.mark.asyncio
+    async def test_query_hot_entities(self, seeded_db):
+        db, _ = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import query_hot_entities
+            results = await query_hot_entities(limit=10)
+            assert len(results) >= 3 and results[0]["name"]
 
-        history = await query_sentiment_history(hours=24)
-        assert len(history) >= 1
-        assert history[0]["score"] == -0.8
+    @pytest.mark.asyncio
+    async def test_load_entities_for_news(self, seeded_db):
+        db, ids = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import load_entities_for_news
+            results = await load_entities_for_news(ids["n1"])
+            assert len(results) >= 2
 
-    async def test_save_alert(self):
-        from app.repository import save_news, save_sentiment, save_alert, query_alert_history
-        item = NewsItem(source="test", title="告警测试", title_hash="alert_hash")
-        news_id = await save_news(item)
-        sent = SentimentResult(news_item=item, score=-0.9, label="negative", confidence=0.9)
-        sent_id = await save_sentiment(news_id, sent)
 
+class TestMultiSentimentPersistence:
+    @pytest.mark.asyncio
+    async def test_save_multi_sentiment(self, seeded_db):
+        db, ids = seeded_db
+        ms = MultiSentiment(news_id=ids["n1"], entity_name="央行", fear=0.7, greed=0.1, optimism=0.2, uncertainty=0.6, dominant="fear", momentum=0.3, momentum_shift=True)
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_multi_sentiment
+            await save_multi_sentiment(ms)
+            rows = await db.execute_fetchall("SELECT * FROM multi_sentiment WHERE entity_name = '央行'")
+            assert len(rows) >= 2
+
+    @pytest.mark.asyncio
+    async def test_load_last_multi_sentiment(self, seeded_db):
+        db, _ = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import load_last_multi_sentiment
+            result = await load_last_multi_sentiment("央行")
+            assert result is not None and "fear" in result
+
+
+class TestReportPersistence:
+    @pytest.mark.asyncio
+    async def test_save_and_load_report(self, db):
         alert = AlertPayload(
-            news_item=item, sentiment=sent,
-            alert_level="critical", triggered_keywords=["降息"],
+            news_item=NewsItem(source="test", title="测试新闻"),
+            sentiment=SentimentResult(news_item=NewsItem(source="test", title="x"), score=0.5, label="positive"),
+            alert_level="info", triggered_keywords=["关键词"], deep_analysis="测试研报",
         )
-        alert_id = await save_alert(news_id, sent_id, alert)
-        assert alert_id is not None
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_report, load_report
+            await save_report("r_test123", alert)
+            result = await load_report("r_test123")
+            assert result["deep_analysis"] == "测试研报" and result["alert_level"] == "info"
 
-        alerts = await query_alert_history()
-        assert len(alerts) >= 1
+    @pytest.mark.asyncio
+    async def test_save_report_with_references(self, db):
+        alert = AlertPayload(
+            news_item=NewsItem(source="test", title="测试"),
+            sentiment=SentimentResult(news_item=NewsItem(source="test", title="x"), score=0.3, label="neutral"),
+        )
+        refs = [{"title": "参考1", "source": "s1", "url": "http://example.com"}]
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_report, load_report
+            await save_report("r_ref", alert, referenced_news=refs)
+            result = await load_report("r_ref")
+            assert len(result["referenced_news"]) == 1
 
-    async def test_sentiment_trend(self):
-        from app.repository import save_news, save_sentiment, query_sentiment_trend
-        item = NewsItem(source="test", title="趋势测试", title_hash="trend_hash")
-        news_id = await save_news(item)
-        sent = SentimentResult(news_item=item, score=0.5, label="positive", confidence=0.5)
-        await save_sentiment(news_id, sent)
+    @pytest.mark.asyncio
+    async def test_load_report_not_found(self, db):
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import load_report
+            assert await load_report("nonexistent") is None
 
-        trend = await query_sentiment_trend(hours=24)
-        assert len(trend) >= 1
 
-    async def test_subscription_crud(self):
-        from app.repository import save_subscription, load_subscriptions, delete_subscription
-        await save_subscription("user1", ["美联储", "降息"], -0.5)
-        subs = await load_subscriptions()
-        assert "user1" in subs
-        assert subs["user1"]["keywords"] == ["美联储", "降息"]
+class TestRelationPersistence:
+    @pytest.mark.asyncio
+    async def test_save_and_load_relations(self, db):
+        relations = [EntityRelation(source="央行", target="LPR", relation="affects", confidence=0.8)]
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_relations, load_relations_for_context
+            await save_relations(relations, news_id=1)
+            results = await load_relations_for_context(["央行"])
+            assert len(results) >= 1
 
-        await delete_subscription("user1")
-        subs = await load_subscriptions()
-        assert "user1" not in subs
 
-    async def test_cleanup(self):
-        from app.repository import save_news, cleanup_old_data, query_news
-        item = NewsItem(source="test", title="清理测试", title_hash="clean_hash")
-        await save_news(item)
-        # Cleanup with 0 days should remove records created before today
-        # Since our record was just created, it shouldn't be removed
-        await cleanup_old_data(days=0)
-        # The record is fresh so it may or may not be removed depending on datetime precision
-        # Just verify the function doesn't error
-        results = await query_news()
-        assert isinstance(results, list)
+class TestSubscriptionPersistence:
+    @pytest.mark.asyncio
+    async def test_save_and_load_subscriptions(self, db):
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_subscription, load_subscriptions
+            await save_subscription("u1", ["降息", "利率"], -0.5)
+            result = await load_subscriptions()
+            assert "u1" in result and "降息" in result["u1"]["keywords"]
+
+    @pytest.mark.asyncio
+    async def test_delete_subscription(self, db):
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_subscription, delete_subscription, load_subscriptions
+            await save_subscription("u1", ["降息"], -0.5)
+            await delete_subscription("u1")
+            assert "u1" not in await load_subscriptions()

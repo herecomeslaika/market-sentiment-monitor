@@ -166,7 +166,7 @@ class TestSourceConfig:
         assert "cls" in sources
         assert "jin10" in sources
         assert "kr36" in sources
-        assert len(sources) == 7
+        assert len(sources) >= 13  # 7 domestic + 6 overseas
 
     def test_source_config_fields(self):
         sources = default_sources()

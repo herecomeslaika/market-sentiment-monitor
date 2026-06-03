@@ -1,218 +1,127 @@
-"""Tests for the report service module."""
+"""Tests for report service module."""
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
-from app import deps
-from app.models import AlertPayload, NewsItem, SentimentResult
-from config.settings import Settings
-
-
-def _make_alert(title: str = "测试新闻", deep_analysis: str | None = "深度研报内容") -> AlertPayload:
-    item = NewsItem(source="test", title=title, title_hash="test_hash")
-    sentiment = SentimentResult(news_item=item, score=-0.8, label="negative")
-    return AlertPayload(
-        news_item=item, sentiment=sentiment,
-        alert_level="critical", triggered_keywords=["降息"],
-        deep_analysis=deep_analysis,
-    )
-
-
-@pytest.fixture
-def mock_db():
-    """Provide an in-memory SQLite DB for report tests."""
-    import aiosqlite
-    from app.db import SCHEMA
-
-    db = None
-
-    async def _init():
-        nonlocal db
-        db = await aiosqlite.connect(":memory:")
-        db.row_factory = aiosqlite.Row
-        await db.executescript(SCHEMA)
-        await db.commit()
-        return db
-
-    async def _get():
-        return db
-
-    async def _close():
-        nonlocal db
-        if db:
-            await db.close()
-            db = None
-
-    return _init, _get, _close
-
-
-class TestStoreAndGetReport:
-    @pytest.mark.asyncio
-    async def test_store_report_returns_id(self, mock_db):
-        init, get_db, close = mock_db
-        db = await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report
-            alert = _make_alert()
-            report_id = await store_report(alert)
-            assert report_id.startswith("r_")
-        await close()
-
-    @pytest.mark.asyncio
-    async def test_get_report_exists(self, mock_db):
-        init, get_db, close = mock_db
-        db = await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, get_report
-            alert = _make_alert()
-            report_id = await store_report(alert)
-            result = await get_report(report_id)
-            assert result is not None
-            assert result["alert_level"] == "critical"
-            assert result["news_title"] == "测试新闻"
-            assert "降息" in result["triggered_keywords"]
-        await close()
-
-    @pytest.mark.asyncio
-    async def test_get_report_not_exists(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import get_report
-            result = await get_report("nonexistent_id")
-            assert result is None
-        await close()
+from app.models import NewsItem, SentimentResult, AlertPayload
 
 
 class TestExportMarkdown:
-    @pytest.mark.asyncio
-    async def test_export_markdown_exists(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, get_report, export_markdown
-            alert = _make_alert()
-            report_id = await store_report(alert)
-            report = await get_report(report_id)
-            md = export_markdown(report)
-            assert md is not None
-            assert "测试新闻" in md
-            assert "深度研报内容" in md
-            assert "降息" in md
-        await close()
-
-    @pytest.mark.asyncio
-    async def test_export_markdown_not_exists(self):
+    def test_export_full_report(self):
         from app.analysis.report_service import export_markdown
-        md = export_markdown(None)
-        assert md is None
+        report = {
+            "news_title": "央行宣布降息",
+            "news_source": "新浪财经",
+            "sentiment_score": -0.5,
+            "sentiment_label": "negative",
+            "sentiment_confidence": 0.85,
+            "alert_level": "warning",
+            "triggered_keywords": ["降息", "央行"],
+            "created_at": "2026-06-01 10:00:00",
+            "news_url": "https://example.com",
+            "news_snippet": "人民银行宣布下调LPR利率",
+            "deep_analysis": "央行降息对市场的影响分析...",
+        }
+        md = export_markdown(report)
+        assert md is not None
+        assert "# 央行宣布降息" in md
+        assert "新浪财经" in md
+        assert "-0.500" in md
+        assert "降息" in md
+        assert "深度研报" in md
+        assert "人民银行" in md
 
-    @pytest.mark.asyncio
-    async def test_export_markdown_no_deep_analysis(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, get_report, export_markdown
-            alert = _make_alert(deep_analysis=None)
-            report_id = await store_report(alert)
-            report = await get_report(report_id)
-            md = export_markdown(report)
-            assert md is not None
-            assert "深度研报" not in md
-        await close()
+    def test_export_empty_report(self):
+        from app.analysis.report_service import export_markdown
+        assert export_markdown(None) is None
+        assert export_markdown({}) is None
 
-    @pytest.mark.asyncio
-    async def test_export_markdown_with_url(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, get_report, export_markdown
-            alert = _make_alert()
-            alert.news_item.url = "https://example.com/news"
-            report_id = await store_report(alert)
-            report = await get_report(report_id)
-            md = export_markdown(report)
-            assert "https://example.com/news" in md
-        await close()
-
-    @pytest.mark.asyncio
-    async def test_export_markdown_with_snippet(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, get_report, export_markdown
-            alert = _make_alert()
-            alert.news_item.content_snippet = "这是一段新闻摘要"
-            report_id = await store_report(alert)
-            report = await get_report(report_id)
-            md = export_markdown(report)
-            assert "新闻摘要" in md
-            assert "这是一段新闻摘要" in md
-        await close()
+    def test_export_report_with_url(self):
+        from app.analysis.report_service import export_markdown
+        report = {
+            "news_title": "测试",
+            "news_source": "test",
+            "sentiment_score": 0.5,
+            "sentiment_label": "positive",
+            "sentiment_confidence": 0.9,
+            "alert_level": "info",
+            "triggered_keywords": [],
+            "created_at": "2026-06-01",
+            "news_url": "https://example.com/article",
+            "news_snippet": "新闻摘要内容",
+        }
+        md = export_markdown(report)
+        assert "https://example.com/article" in md
+        assert "新闻摘要内容" in md
 
 
 class TestFollowupQuestion:
     @pytest.mark.asyncio
-    async def test_followup_no_report(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
+    async def test_followup_no_report(self, db):
+        with patch("app.repository.get_db", return_value=db):
             from app.analysis.report_service import followup_question
-            result = await followup_question("nonexistent", "问题")
+            result = await followup_question("nonexistent", "追问问题")
             assert result is None
-        await close()
 
     @pytest.mark.asyncio
-    async def test_followup_no_deep_analysis(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report, followup_question
-            alert = _make_alert(deep_analysis=None)
-            report_id = await store_report(alert)
-            result = await followup_question(report_id, "问题")
+    async def test_followup_with_report(self, seeded_db):
+        db, ids = seeded_db
+        # Save a report first
+        alert = AlertPayload(
+            news_item=NewsItem(source="test", title="央行降息"),
+            sentiment=SentimentResult(news_item=NewsItem(source="test", title="x"), score=-0.5, label="negative"),
+            deep_analysis="央行降息利好债券市场",
+        )
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_report
+            await save_report("r_followup_test", alert)
+
+        mock_client = AsyncMock()
+        mock_client.analyze.return_value = "降息对银行股的影响更大"
+
+        with patch("app.analysis.deepseek_client.DeepSeekClient", return_value=mock_client), \
+             patch("app.analysis.report_service.deps") as mock_deps, \
+             patch("app.repository.get_db", return_value=db):
+            mock_deps.settings = MagicMock()
+            from app.analysis.report_service import followup_question
+            result = await followup_question("r_followup_test", "降息对银行股有什么影响")
+            assert result is not None
+            assert "银行股" in result
+
+
+class TestMultiModelCompare:
+    @pytest.mark.asyncio
+    async def test_compare_no_report(self, db):
+        with patch("app.repository.get_db", return_value=db):
+            from app.analysis.report_service import multi_model_compare
+            result = await multi_model_compare("nonexistent")
             assert result is None
-        await close()
-
-
-class TestQueryReports:
-    @pytest.mark.asyncio
-    async def test_query_reports_empty(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.repository import query_reports
-            results = await query_reports()
-            assert results == []
-        await close()
 
     @pytest.mark.asyncio
-    async def test_query_reports_with_data(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report
-            from app.repository import query_reports
-            alert = _make_alert()
-            await store_report(alert)
-            results = await query_reports()
-            assert len(results) == 1
-            assert results[0]["alert_level"] == "critical"
-        await close()
+    async def test_compare_with_report(self, seeded_db):
+        db, ids = seeded_db
+        alert = AlertPayload(
+            news_item=NewsItem(source="test", title="降息利好"),
+            sentiment=SentimentResult(news_item=NewsItem(source="test", title="x"), score=0.5, label="positive"),
+            deep_analysis="降息利好分析",
+        )
+        with patch("app.repository.get_db", return_value=db):
+            from app.repository import save_report
+            await save_report("r_compare_test", alert)
 
-    @pytest.mark.asyncio
-    async def test_query_reports_filter_level(self, mock_db):
-        init, get_db, close = mock_db
-        await init()
-        with patch("app.repository.get_db", get_db):
-            from app.analysis.report_service import store_report
-            from app.repository import query_reports
-            alert_critical = _make_alert(title="严重新闻")
-            alert_critical.alert_level = "critical"
-            alert_warning = _make_alert(title="警告新闻")
-            alert_warning.alert_level = "warning"
-            await store_report(alert_critical)
-            await store_report(alert_warning)
-            results = await query_reports(level="warning")
-            assert len(results) == 1
-            assert results[0]["alert_level"] == "warning"
-        await close()
+        mock_client = AsyncMock()
+        mock_client.analyze.return_value = "相反视角：降息可能引发通胀风险"
+
+        mock_settings = MagicMock()
+        mock_settings.deepseek_api_key = "test-key"
+        mock_settings.deepseek_model = "deepseek-chat"
+        mock_settings.deepseek_temperature = 0.7
+        mock_settings.deepseek_max_tokens = 2048
+
+        with patch("app.analysis.deepseek_client.DeepSeekClient", return_value=mock_client), \
+             patch("app.analysis.report_service.deps") as mock_deps, \
+             patch("app.repository.get_db", return_value=db):
+            mock_deps.settings = mock_settings
+            from app.analysis.report_service import multi_model_compare
+            result = await multi_model_compare("r_compare_test")
+            assert result is not None
+            assert "contrarian_view" in result

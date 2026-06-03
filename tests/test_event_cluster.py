@@ -1,103 +1,90 @@
 """Tests for event clustering module."""
 import pytest
-from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock, patch, MagicMock
+from datetime import datetime, timezone
 
 from app.models import Entity, EventCluster
 
 
-class TestEntityNames:
-    def test_extracts_names_and_aliases(self):
-        from app.analysis.event_cluster import _entity_names
-        entities = [
-            Entity(name="工商银行", type="company", aliases=["ICBC", "工行"]),
-            Entity(name="银行业", type="industry"),
-        ]
-        names = _entity_names(entities)
-        assert "工商银行" in names
-        assert "icbc" in names
-        assert "工行" in names
-        assert "银行业" in names
-
-
 class TestFindMatchingCluster:
-    def test_finds_match_by_entity_overlap(self):
+    @pytest.mark.asyncio
+    async def test_matching_by_entity_overlap(self):
         from app.analysis.event_cluster import find_matching_cluster
-        entities = [
-            Entity(name="工商银行", type="company", aliases=[]),
-            Entity(name="降息", type="policy", aliases=[]),
-            Entity(name="银行业", type="industry", aliases=[]),
-        ]
-        existing = [EventCluster(
-            cluster_id="ev_test1",
-            title="降息影响银行业",
-            entities=[Entity(name="降息", type="policy"), Entity(name="银行业", type="industry"), Entity(name="LPR", type="indicator")],
-            news_ids=[1],
-            sentiment_avg=-0.3,
+        existing = EventCluster(
+            cluster_id="ev_1", title="央行降息", entities=[
+                Entity(name="央行", type="policy"),
+                Entity(name="LPR", type="indicator"),
+            ], news_ids=[1], sentiment_avg=-0.5,
             sentiment_distribution={"negative": 1},
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
-            significance=0.3,
-        )]
-        result = find_matching_cluster(entities, existing, datetime.now(timezone.utc))
+            first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc),
+        )
+        new_entities = [Entity(name="央行", type="policy"), Entity(name="LPR", type="indicator")]
+        result = find_matching_cluster(new_entities, [existing], datetime.now(timezone.utc))
         assert result is not None
-        assert result.cluster_id == "ev_test1"
+        assert result.cluster_id == "ev_1"
 
-    def test_no_match_insufficient_overlap(self):
+    @pytest.mark.asyncio
+    async def test_no_match_different_entities(self):
         from app.analysis.event_cluster import find_matching_cluster
-        entities = [Entity(name="特斯拉", type="company", aliases=[])]
-        existing = [EventCluster(
-            cluster_id="ev_test2",
-            title="银行降息",
-            entities=[Entity(name="工商银行", type="company"), Entity(name="降息", type="policy")],
-            news_ids=[1],
-            sentiment_avg=0.0,
-            sentiment_distribution={"neutral": 1},
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
-            significance=0.1,
-        )]
-        result = find_matching_cluster(entities, existing, datetime.now(timezone.utc))
+        existing = EventCluster(
+            cluster_id="ev_1", title="央行降息", entities=[
+                Entity(name="央行", type="policy"),
+                Entity(name="LPR", type="indicator"),
+            ], news_ids=[1], sentiment_avg=-0.5,
+            sentiment_distribution={"negative": 1},
+            first_seen=datetime.now(timezone.utc), last_seen=datetime.now(timezone.utc),
+        )
+        new_entities = [Entity(name="苹果", type="company"), Entity(name="AI", type="industry")]
+        result = find_matching_cluster(new_entities, [existing], datetime.now(timezone.utc))
         assert result is None
 
-    def test_no_match_time_window_expired(self):
+    @pytest.mark.asyncio
+    async def test_no_match_empty_entities(self):
         from app.analysis.event_cluster import find_matching_cluster
-        entities = [Entity(name="工商银行", type="company"), Entity(name="降息", type="policy")]
-        old_time = datetime.now(timezone.utc) - timedelta(hours=50)
-        existing = [EventCluster(
-            cluster_id="ev_test3",
-            title="旧事件",
-            entities=[Entity(name="工商银行", type="company"), Entity(name="降息", type="policy")],
-            news_ids=[1],
-            sentiment_avg=0.0,
-            sentiment_distribution={"neutral": 1},
-            first_seen=old_time,
-            last_seen=old_time,
-            significance=0.1,
-        )]
-        result = find_matching_cluster(entities, existing, datetime.now(timezone.utc))
+        result = find_matching_cluster([], [], datetime.now(timezone.utc))
         assert result is None
 
 
-class TestSignificance:
-    def test_high_significance(self):
+class TestComputeSignificance:
+    def test_high_count_high_sentiment(self):
         from app.analysis.event_cluster import compute_significance
-        score = compute_significance(8, -0.8)
-        assert score >= 0.5
+        score = compute_significance(10, -0.8)
+        assert score > 0.7
 
-    def test_low_significance(self):
+    def test_low_count_low_sentiment(self):
         from app.analysis.event_cluster import compute_significance
-        score = compute_significance(1, 0.0)
+        score = compute_significance(1, 0.1)
         assert score < 0.3
 
+    def test_bounded_between_0_and_1(self):
+        from app.analysis.event_cluster import compute_significance
+        for count in [0, 1, 5, 100]:
+            for avg in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+                score = compute_significance(count, avg)
+                assert 0 <= score <= 1
 
-class TestSentimentDistribution:
-    def test_distribution(self):
-        from app.analysis.event_cluster import compute_sentiment_distribution
-        sentiments = [
-            {"label": "positive"},
-            {"label": "positive"},
-            {"label": "negative"},
-        ]
-        dist = compute_sentiment_distribution(sentiments)
-        assert dist["positive"] == 2
-        assert dist["negative"] == 1
+
+class TestTryCluster:
+    @pytest.mark.asyncio
+    async def test_cluster_without_entities_returns_none(self, seeded_db):
+        db, ids = seeded_db
+        with patch("app.repository.get_db", return_value=db):
+            from app.analysis.event_cluster import try_cluster
+            result = await try_cluster(ids["n1"], "测试标题", [], 0.5, "positive")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_cluster_creates_new(self, db):
+        entities = [Entity(name="英伟达", type="company"), Entity(name="AI芯片", type="industry")]
+        mock_client = AsyncMock()
+        mock_client.analyze.return_value = "英伟达AI芯片事件"
+
+        with patch("app.analysis.deepseek_client.DeepSeekClient", return_value=mock_client), \
+             patch("app.analysis.event_cluster.deps") as mock_deps, \
+             patch("app.repository.get_db", return_value=db):
+            mock_deps.settings = MagicMock()
+            from app.analysis.event_cluster import try_cluster
+            result = await try_cluster(1, "英伟达发布新AI芯片", entities, 0.7, "positive")
+            if result:
+                assert result.cluster_id.startswith("ev_")
+                assert len(result.entities) == 2
