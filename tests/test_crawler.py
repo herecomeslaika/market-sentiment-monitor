@@ -14,28 +14,35 @@ from collections import OrderedDict
 
 
 class TestComputeTitleHash:
+    @pytest.mark.unit
     def test_same_title_same_hash(self):
         assert compute_title_hash("test") == compute_title_hash("test")
 
+    @pytest.mark.unit
     def test_different_title_different_hash(self):
         assert compute_title_hash("hello") != compute_title_hash("world")
 
+    @pytest.mark.unit
     def test_whitespace_trimmed(self):
         assert compute_title_hash("  hello  ") == compute_title_hash("hello")
 
 
 class TestCleanHtml:
+    @pytest.mark.unit
     def test_strips_tags(self):
         assert _clean_html("<p>Hello <b>world</b></p>") == "Hello world"
 
+    @pytest.mark.unit
     def test_collapses_whitespace(self):
         assert _clean_html("a   b") == "a b"
 
+    @pytest.mark.unit
     def test_truncates(self):
         assert len(_clean_html("x" * 1000)) == 500
 
 
 class TestParseSina:
+    @pytest.mark.unit
     def test_parse_valid(self):
         data = json.dumps({
             "result": {
@@ -50,10 +57,12 @@ class TestParseSina:
         assert items[0].title == "测试标题"
         assert items[0].source == "新浪财经-A股"
 
+    @pytest.mark.unit
     def test_parse_empty(self):
         items = parse_sina("{}", "新浪财经")
         assert items == []
 
+    @pytest.mark.unit
     def test_parse_no_title_skipped(self):
         data = json.dumps({"result": {"data": [{"title": "", "url": ""}]}})
         items = parse_sina(data, "新浪财经")
@@ -61,6 +70,7 @@ class TestParseSina:
 
 
 class TestParseCls:
+    @pytest.mark.unit
     def test_parse_roll_data(self):
         data = json.dumps({
             "data": {
@@ -73,11 +83,13 @@ class TestParseCls:
         assert len(items) == 1
         assert items[0].source == "财联社"
 
+    @pytest.mark.unit
     def test_parse_direct_list(self):
         data = json.dumps({"data": [{"title": "直接列表", "content": "c", "id": "1"}]})
         items = parse_cls(data, "财联社")
         assert len(items) == 1
 
+    @pytest.mark.unit
     def test_content_as_title_fallback(self):
         data = json.dumps({"data": {"roll_data": [{"content": "这是一条没有标题的新闻", "id": "99"}]}})
         items = parse_cls(data, "财联社")
@@ -86,6 +98,7 @@ class TestParseCls:
 
 
 class TestParseEastMoney:
+    @pytest.mark.unit
     def test_parse_valid(self):
         data = json.dumps({
             "data": {
@@ -98,17 +111,20 @@ class TestParseEastMoney:
         assert len(items) == 1
         assert items[0].source == "东方财富"
 
+    @pytest.mark.unit
     def test_parse_empty_list(self):
         data = json.dumps({"data": {"list": []}})
         items = parse_eastmoney(data, "东方财富")
         assert items == []
 
+    @pytest.mark.unit
     def test_parse_null_data(self):
         items = parse_eastmoney('{"data": null}', "东方财富")
         assert items == []
 
 
 class TestParseJin10:
+    @pytest.mark.unit
     def test_parse_valid(self):
         data = json.dumps({
             "data": [
@@ -120,12 +136,14 @@ class TestParseJin10:
         assert items[0].source == "金十数据"
         assert "abc123" in items[0].url
 
+    @pytest.mark.unit
     def test_parse_empty(self):
         items = parse_jin10('{"data": []}', "金十数据")
         assert items == []
 
 
 class TestParseKr36:
+    @pytest.mark.unit
     def test_parse_items(self):
         data = json.dumps({
             "data": {
@@ -139,6 +157,7 @@ class TestParseKr36:
         assert items[0].source == "36氪"
         assert items[0].title == "36氪新闻标题"
 
+    @pytest.mark.unit
     def test_parse_entity_fallback(self):
         data = json.dumps({
             "data": {
@@ -151,12 +170,14 @@ class TestParseKr36:
         assert len(items) == 1
         assert items[0].title == "实体标题"
 
+    @pytest.mark.unit
     def test_parse_empty(self):
         items = parse_kr36('{"data": {"items": []}}', "36氪")
         assert items == []
 
 
 class TestSourceConfig:
+    @pytest.mark.unit
     def test_default_sources(self):
         sources = default_sources()
         assert "sina_stock" in sources
@@ -168,6 +189,7 @@ class TestSourceConfig:
         assert "kr36" in sources
         assert len(sources) >= 13  # 7 domestic + 6 overseas
 
+    @pytest.mark.unit
     def test_source_config_fields(self):
         sources = default_sources()
         sina = sources["sina_stock"]
@@ -176,6 +198,7 @@ class TestSourceConfig:
         assert sina.enabled is True
         assert sina.retries >= 1
 
+    @pytest.mark.unit
     def test_all_parsers_registered(self):
         sources = default_sources()
         for key, src in sources.items():
@@ -183,28 +206,33 @@ class TestSourceConfig:
 
 
 class TestSourceHealth:
+    @pytest.mark.unit
     def test_health_init(self):
         h = SourceHealth()
         assert h.consecutive_failures == 0
         assert h.is_healthy is True
 
+    @pytest.mark.unit
     def test_health_unhealthy(self):
         h = SourceHealth()
         h.consecutive_failures = 5
         assert h.is_healthy is False
 
+    @pytest.mark.unit
     def test_get_source_health(self):
         health = get_source_health()
         assert isinstance(health, dict)
 
 
 class TestDedup:
+    @pytest.mark.unit
     def test_new_item_not_duplicate(self):
         deps.dedup_cache = OrderedDict()
         deps.settings = Settings(deepseek_api_key="test")
         result = check_and_register("hash1")
         assert result is False
 
+    @pytest.mark.unit
     def test_same_item_is_duplicate(self):
         deps.dedup_cache = OrderedDict()
         deps.settings = Settings(deepseek_api_key="test")
@@ -212,6 +240,7 @@ class TestDedup:
         result = check_and_register("hash1")
         assert result is True
 
+    @pytest.mark.unit
     def test_cache_eviction(self):
         deps.dedup_cache = OrderedDict()
         deps.settings = Settings(deepseek_api_key="test", dedup_cache_max_size=3)

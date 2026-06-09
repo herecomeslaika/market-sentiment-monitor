@@ -7,7 +7,9 @@ from app.models import Entity, EventCluster
 
 
 class TestFindMatchingCluster:
+    @pytest.mark.unit
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_matching_by_entity_overlap(self):
         from app.analysis.event_cluster import find_matching_cluster
         existing = EventCluster(
@@ -24,6 +26,7 @@ class TestFindMatchingCluster:
         assert result.cluster_id == "ev_1"
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_no_match_different_entities(self):
         from app.analysis.event_cluster import find_matching_cluster
         existing = EventCluster(
@@ -39,6 +42,7 @@ class TestFindMatchingCluster:
         assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_no_match_empty_entities(self):
         from app.analysis.event_cluster import find_matching_cluster
         result = find_matching_cluster([], [], datetime.now(timezone.utc))
@@ -46,16 +50,19 @@ class TestFindMatchingCluster:
 
 
 class TestComputeSignificance:
+    @pytest.mark.unit
     def test_high_count_high_sentiment(self):
         from app.analysis.event_cluster import compute_significance
         score = compute_significance(10, -0.8)
         assert score > 0.7
 
+    @pytest.mark.unit
     def test_low_count_low_sentiment(self):
         from app.analysis.event_cluster import compute_significance
         score = compute_significance(1, 0.1)
         assert score < 0.3
 
+    @pytest.mark.unit
     def test_bounded_between_0_and_1(self):
         from app.analysis.event_cluster import compute_significance
         for count in [0, 1, 5, 100]:
@@ -65,7 +72,9 @@ class TestComputeSignificance:
 
 
 class TestTryCluster:
+    @pytest.mark.unit
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_cluster_without_entities_returns_none(self, seeded_db):
         db, ids = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -74,6 +83,7 @@ class TestTryCluster:
             assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_cluster_creates_new(self, db):
         entities = [Entity(name="英伟达", type="company"), Entity(name="AI芯片", type="industry")]
         mock_client = AsyncMock()

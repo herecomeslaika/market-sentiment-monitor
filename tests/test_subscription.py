@@ -13,9 +13,11 @@ def _make_alert(title: str, score: float) -> AlertPayload:
 
 
 class TestMatchSubscriptions:
+    @pytest.mark.unit
     def setup_method(self):
         deps.active_subscriptions = {}
 
+    @pytest.mark.unit
     def test_keyword_match_and_threshold(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["美联储", "降息"], threshold=-0.5
@@ -26,6 +28,7 @@ class TestMatchSubscriptions:
         sub, kws = matched[0]
         assert "降息" in kws
 
+    @pytest.mark.unit
     def test_keyword_match_but_threshold_not_crossed(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["美联储"], threshold=-0.9
@@ -34,6 +37,7 @@ class TestMatchSubscriptions:
         matched = match_subscriptions(alert)
         assert len(matched) == 0
 
+    @pytest.mark.unit
     def test_no_keyword_match(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["比特币"], threshold=-0.5
@@ -42,6 +46,7 @@ class TestMatchSubscriptions:
         matched = match_subscriptions(alert)
         assert len(matched) == 0
 
+    @pytest.mark.unit
     def test_multiple_subscriptions(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["美联储"], threshold=-0.5
@@ -53,6 +58,7 @@ class TestMatchSubscriptions:
         matched = match_subscriptions(alert)
         assert len(matched) == 2
 
+    @pytest.mark.unit
     def test_positive_score_negative_threshold(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["利好"], threshold=-0.5
@@ -62,11 +68,13 @@ class TestMatchSubscriptions:
         matched = match_subscriptions(alert)
         assert len(matched) == 0
 
+    @pytest.mark.unit
     def test_empty_subscriptions(self):
         alert = _make_alert("测试", -0.8)
         matched = match_subscriptions(alert)
         assert len(matched) == 0
 
+    @pytest.mark.unit
     def test_multiple_keyword_match(self):
         deps.active_subscriptions["u1"] = Subscription(
             user_id="u1", keywords=["美联储", "降息", "基点"], threshold=-0.5

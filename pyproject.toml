@@ -35,3 +35,17 @@ packages = ["app", "config"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+markers = [
+    "unit: Unit tests (no external dependencies, fast)",
+    "integration: Integration tests (require DB or internal services)",
+    "api: API endpoint tests (require ASGI test client)",
+    "slow: Slow tests (LLM calls, network)",
+    "edge: Edge case and boundary condition tests",
+    "security: Security and input validation tests",
+    "concurrency: Concurrency and race condition tests",
+    "performance: Performance and load tests",
+    "e2e: End-to-end pipeline tests",
+]

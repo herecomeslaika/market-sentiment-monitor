@@ -16,11 +16,13 @@ class FakeWS:
 
 
 class TestConnectionManager:
+    @pytest.mark.unit
     def test_get_manager_singleton(self):
         m1 = get_manager()
         m2 = get_manager()
         assert m1 is m2
 
+    @pytest.mark.unit
     async def test_connect_and_disconnect(self):
         manager = ConnectionManager()
         ws = FakeWS()
@@ -30,6 +32,7 @@ class TestConnectionManager:
         manager.disconnect("user1")
         assert "user1" not in manager.active_connections
 
+    @pytest.mark.unit
     async def test_send_to_user(self):
         manager = ConnectionManager()
         ws = FakeWS()
@@ -40,12 +43,14 @@ class TestConnectionManager:
         assert len(ws.sent) == 1
         assert ws.sent[0]["type"] == "test"
 
+    @pytest.mark.unit
     async def test_send_to_nonexistent_user(self):
         manager = ConnectionManager()
         from app.models import WSMessage
         msg = WSMessage(type="test", payload={})
         await manager.send_to_user("nobody", msg)
 
+    @pytest.mark.unit
     async def test_broadcast(self):
         manager = ConnectionManager()
         ws1 = FakeWS()
@@ -57,6 +62,7 @@ class TestConnectionManager:
         assert len(ws1.sent) == 1
         assert len(ws2.sent) == 1
 
+    @pytest.mark.unit
     async def test_broadcast_removes_disconnected(self):
         manager = ConnectionManager()
 

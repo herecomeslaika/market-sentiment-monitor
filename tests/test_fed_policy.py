@@ -6,7 +6,9 @@ from app.models import NewsItem
 
 
 class TestSearchFedNews:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_search_finds_fed_news(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -15,6 +17,7 @@ class TestSearchFedNews:
             assert isinstance(results, list)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_search_returns_empty_for_no_match(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.analysis.fed_policy import search_fed_news
@@ -24,7 +27,9 @@ class TestSearchFedNews:
 
 
 class TestCrawlFedNews:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_crawl_filters_fed_keywords(self):
         mock_items = [
             NewsItem(source="cnbc", title="Fed signals rate cut in September", url="", content_snippet="test", title_hash="h1"),
@@ -37,6 +42,7 @@ class TestCrawlFedNews:
             assert any("Fed" in r["title"] for r in results)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_crawl_handles_failure(self):
         with patch("app.crawler.sources.fetch_all_sources", side_effect=Exception("Network error")):
             from app.analysis.fed_policy import crawl_fed_news
@@ -45,7 +51,9 @@ class TestCrawlFedNews:
 
 
 class TestGeneratePolicySummary:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_generate_valid_summary(self):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '{"rate_trend":"cutting","policy_stance":"dovish","qt_qe_status":"QT ongoing","rate_level":"5.00%-5.25%","summary":"美联储进入降息周期","key_events":["FOMC signals rate cut"],"outlook":"预计下半年降息","sources":["CNBC"]}'
@@ -61,6 +69,7 @@ class TestGeneratePolicySummary:
             assert result["policy_stance"] == "dovish"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_generate_handles_markdown_json(self):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '```json\n{"rate_trend":"hiking","policy_stance":"hawkish","qt_qe_status":"QE ongoing","rate_level":"","summary":"test","key_events":[],"outlook":"","sources":[]}\n```'
@@ -75,6 +84,7 @@ class TestGeneratePolicySummary:
             assert result["rate_trend"] == "hiking"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_generate_handles_malformed_response(self):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = "不是JSON格式"
@@ -89,12 +99,14 @@ class TestGeneratePolicySummary:
             assert result["rate_trend"] == "unclear"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_generate_empty_news_returns_none(self):
         from app.analysis.fed_policy import generate_policy_summary
         result = await generate_policy_summary([])
         assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_generate_handles_timeout(self):
         mock_client = AsyncMock()
         mock_client.analyze.side_effect = TimeoutError()
@@ -109,7 +121,9 @@ class TestGeneratePolicySummary:
 
 
 class TestGetFedPolicy:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_returns_cached_if_fresh(self, db):
         from app.repository import save_fed_policy_summary
         with patch("app.repository.get_db", return_value=db):
@@ -131,6 +145,7 @@ class TestGetFedPolicy:
             assert result["summary"] == "cached test"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_returns_no_data_when_empty(self, db):
         with patch("app.analysis.fed_policy.search_fed_news", return_value=[]), \
              patch("app.analysis.fed_policy.crawl_fed_news", return_value=[]), \

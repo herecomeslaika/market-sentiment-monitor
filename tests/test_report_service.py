@@ -6,6 +6,7 @@ from app.models import NewsItem, SentimentResult, AlertPayload
 
 
 class TestExportMarkdown:
+    @pytest.mark.integration
     def test_export_full_report(self):
         from app.analysis.report_service import export_markdown
         report = {
@@ -30,11 +31,13 @@ class TestExportMarkdown:
         assert "深度研报" in md
         assert "人民银行" in md
 
+    @pytest.mark.integration
     def test_export_empty_report(self):
         from app.analysis.report_service import export_markdown
         assert export_markdown(None) is None
         assert export_markdown({}) is None
 
+    @pytest.mark.integration
     def test_export_report_with_url(self):
         from app.analysis.report_service import export_markdown
         report = {
@@ -55,7 +58,9 @@ class TestExportMarkdown:
 
 
 class TestFollowupQuestion:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_followup_no_report(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.analysis.report_service import followup_question
@@ -63,6 +68,7 @@ class TestFollowupQuestion:
             assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_followup_with_report(self, seeded_db):
         db, ids = seeded_db
         # Save a report first
@@ -89,7 +95,9 @@ class TestFollowupQuestion:
 
 
 class TestMultiModelCompare:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_compare_no_report(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.analysis.report_service import multi_model_compare
@@ -97,6 +105,7 @@ class TestMultiModelCompare:
             assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_compare_with_report(self, seeded_db):
         db, ids = seeded_db
         alert = AlertPayload(

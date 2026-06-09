@@ -6,7 +6,9 @@ from app.models import Entity, MultiSentiment
 
 
 class TestAnalyzeAndSave:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_analyze_parses_valid_response(self, seeded_db):
         db, ids = seeded_db
         mock_client = AsyncMock()
@@ -24,6 +26,7 @@ class TestAnalyzeAndSave:
             assert result.entity_name == "美联储"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_analyze_handles_malformed_json(self, seeded_db):
         db, ids = seeded_db
         mock_client = AsyncMock()
@@ -37,6 +40,7 @@ class TestAnalyzeAndSave:
             assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_analyze_handles_timeout(self, seeded_db):
         db, ids = seeded_db
         mock_client = AsyncMock()
@@ -50,6 +54,7 @@ class TestAnalyzeAndSave:
             assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_momentum_shift_detected(self, seeded_db):
         db, ids = seeded_db
         mock_client = AsyncMock()
@@ -66,6 +71,7 @@ class TestAnalyzeAndSave:
                 assert isinstance(result.momentum_shift, bool)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_no_entities_skips_analysis(self, seeded_db):
         db, ids = seeded_db
         with patch("app.repository.get_db", return_value=db):

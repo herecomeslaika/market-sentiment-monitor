@@ -32,6 +32,7 @@ def _make_sentiment(title: str = "美联储降息", score: float = -0.8) -> Sent
 class TestSlowTrackAlertLevel:
     """Test alert level assignment logic (extracted from slow_track_consumer)."""
 
+    @pytest.mark.unit
     def test_critical_level(self):
         score = -0.8
         if score <= -0.7:
@@ -42,6 +43,7 @@ class TestSlowTrackAlertLevel:
             level = "info"
         assert level == "critical"
 
+    @pytest.mark.unit
     def test_warning_level(self):
         score = -0.5
         if score <= -0.7:
@@ -52,6 +54,7 @@ class TestSlowTrackAlertLevel:
             level = "info"
         assert level == "warning"
 
+    @pytest.mark.unit
     def test_info_level(self):
         score = -0.2
         if score <= -0.7:
@@ -64,6 +67,7 @@ class TestSlowTrackAlertLevel:
 
 
 class TestDeepAnalysisTrigger:
+    @pytest.mark.unit
     def test_trigger_with_keywords_and_threshold(self):
         from app.analysis.slow_track import should_trigger_deep_analysis
         deps.active_subscriptions["u1"] = Subscription(
@@ -71,6 +75,7 @@ class TestDeepAnalysisTrigger:
         )
         assert should_trigger_deep_analysis(-0.8, ["美联储"]) is True
 
+    @pytest.mark.unit
     def test_no_trigger_without_keywords(self):
         from app.analysis.slow_track import should_trigger_deep_analysis
         deps.active_subscriptions["u1"] = Subscription(
@@ -78,10 +83,12 @@ class TestDeepAnalysisTrigger:
         )
         assert should_trigger_deep_analysis(-0.8, []) is False
 
+    @pytest.mark.unit
     def test_no_trigger_without_subscriptions(self):
         from app.analysis.slow_track import should_trigger_deep_analysis
         assert should_trigger_deep_analysis(-0.8, ["美联储"]) is False
 
+    @pytest.mark.unit
     def test_no_trigger_score_above_threshold(self):
         from app.analysis.slow_track import should_trigger_deep_analysis
         deps.active_subscriptions["u1"] = Subscription(
@@ -91,6 +98,7 @@ class TestDeepAnalysisTrigger:
 
 
 class TestRunDeepAnalysis:
+    @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_run_deep_analysis_timeout(self):
         from app.analysis.slow_track import run_deep_analysis_from_state

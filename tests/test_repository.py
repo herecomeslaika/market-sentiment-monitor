@@ -9,7 +9,9 @@ from app.models import (
 
 
 class TestSaveAndLoadNews:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_news_returns_id(self, db):
         item = NewsItem(source="test", title="新闻标题", title_hash="hash_test")
         with patch("app.repository.get_db", return_value=db):
@@ -18,6 +20,7 @@ class TestSaveAndLoadNews:
             assert news_id is not None and news_id > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_news_dedup(self, db):
         item = NewsItem(source="test", title="重复新闻", title_hash="hash_dup")
         with patch("app.repository.get_db", return_value=db):
@@ -27,6 +30,7 @@ class TestSaveAndLoadNews:
             assert id1 == id2
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_load_news_by_id(self, seeded_db):
         db, ids = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -35,6 +39,7 @@ class TestSaveAndLoadNews:
             assert result["title"] == "央行宣布降息25个基点"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_load_news_not_found(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.repository import load_news_by_id
@@ -42,7 +47,9 @@ class TestSaveAndLoadNews:
 
 
 class TestSentimentPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_sentiment_returns_id(self, seeded_db):
         db, ids = seeded_db
         result = SentimentResult(news_item=NewsItem(source="t", title="x"), score=-0.5, label="negative", confidence=0.85)
@@ -51,6 +58,7 @@ class TestSentimentPersistence:
             assert await save_sentiment(ids["n1"], result) is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_query_sentiment_trend(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -64,7 +72,9 @@ class TestSentimentPersistence:
 
 
 class TestEntityPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_entities(self, seeded_db):
         db, ids = seeded_db
         entities = [Entity(name="工商银行", type="company", aliases=["ICBC"]), Entity(name="银行业", type="industry")]
@@ -74,6 +84,7 @@ class TestEntityPersistence:
             assert len(eids) == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_query_hot_entities(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -82,6 +93,7 @@ class TestEntityPersistence:
             assert len(results) >= 3 and results[0]["name"]
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_load_entities_for_news(self, seeded_db):
         db, ids = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -91,7 +103,9 @@ class TestEntityPersistence:
 
 
 class TestMultiSentimentPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_multi_sentiment(self, seeded_db):
         db, ids = seeded_db
         ms = MultiSentiment(news_id=ids["n1"], entity_name="央行", fear=0.7, greed=0.1, optimism=0.2, uncertainty=0.6, dominant="fear", momentum=0.3, momentum_shift=True)
@@ -102,6 +116,7 @@ class TestMultiSentimentPersistence:
             assert len(rows) >= 2
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_load_last_multi_sentiment(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -111,7 +126,9 @@ class TestMultiSentimentPersistence:
 
 
 class TestReportPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_and_load_report(self, db):
         alert = AlertPayload(
             news_item=NewsItem(source="test", title="测试新闻"),
@@ -125,6 +142,7 @@ class TestReportPersistence:
             assert result["deep_analysis"] == "测试研报" and result["alert_level"] == "info"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_report_with_references(self, db):
         alert = AlertPayload(
             news_item=NewsItem(source="test", title="测试"),
@@ -138,6 +156,7 @@ class TestReportPersistence:
             assert len(result["referenced_news"]) == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_load_report_not_found(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.repository import load_report
@@ -145,7 +164,9 @@ class TestReportPersistence:
 
 
 class TestRelationPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_and_load_relations(self, db):
         relations = [EntityRelation(source="央行", target="LPR", relation="affects", confidence=0.8)]
         with patch("app.repository.get_db", return_value=db):
@@ -156,7 +177,9 @@ class TestRelationPersistence:
 
 
 class TestSubscriptionPersistence:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_save_and_load_subscriptions(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.repository import save_subscription, load_subscriptions
@@ -165,6 +188,7 @@ class TestSubscriptionPersistence:
             assert "u1" in result and "降息" in result["u1"]["keywords"]
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_delete_subscription(self, db):
         with patch("app.repository.get_db", return_value=db):
             from app.repository import save_subscription, delete_subscription, load_subscriptions

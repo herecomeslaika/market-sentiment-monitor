@@ -26,6 +26,7 @@ async def setup_db():
 
 
 class TestSubscriptionManager:
+    @pytest.mark.integration
     async def test_add_subscription(self):
         from app.subscription.manager import add_subscription
         sub = await add_subscription("u1", ["美联储"], -0.5)
@@ -33,6 +34,7 @@ class TestSubscriptionManager:
         assert "美联储" in sub.keywords
         assert "u1" in deps.active_subscriptions
 
+    @pytest.mark.integration
     async def test_remove_subscription(self):
         from app.subscription.manager import add_subscription, remove_subscription
         await add_subscription("u1", ["比特币"], -0.3)
@@ -40,11 +42,13 @@ class TestSubscriptionManager:
         assert removed is True
         assert "u1" not in deps.active_subscriptions
 
+    @pytest.mark.integration
     async def test_remove_nonexistent(self):
         from app.subscription.manager import remove_subscription
         removed = await remove_subscription("nobody")
         assert removed is False
 
+    @pytest.mark.integration
     async def test_persist_and_load(self):
         from app.subscription.manager import add_subscription, load_subscriptions_from_db
         await add_subscription("u1", ["降息"], -0.6)
@@ -56,6 +60,7 @@ class TestSubscriptionManager:
         assert "u1" in deps.active_subscriptions
         assert "降息" in deps.active_subscriptions["u1"].keywords
 
+    @pytest.mark.integration
     async def test_list_subscriptions(self):
         from app.subscription.manager import add_subscription, list_subscriptions
         await add_subscription("u1", ["A"], -0.5)

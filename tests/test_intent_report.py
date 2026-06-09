@@ -6,7 +6,9 @@ from app.models import NewsItem
 
 
 class TestExtractKeywords:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_bilingual_keywords(self):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '["降息","银行","LPR","rate cut","interest rate","bank","Fed"]'
@@ -20,6 +22,7 @@ class TestExtractKeywords:
             assert any(not k.isascii() for k in result)  # Has Chinese keywords
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_fallback_on_failure(self):
         mock_client = AsyncMock()
         mock_client.analyze.side_effect = Exception("API error")
@@ -32,6 +35,7 @@ class TestExtractKeywords:
             assert len(result) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_handles_markdown_json(self):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '```json\n["降息","银行","rate cut"]\n```'
@@ -44,7 +48,9 @@ class TestExtractKeywords:
 
 
 class TestSearchRecentNews:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_search_finds_matching_news(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -53,6 +59,7 @@ class TestSearchRecentNews:
             assert isinstance(results, list)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_search_empty_keywords(self, seeded_db):
         db, _ = seeded_db
         with patch("app.repository.get_db", return_value=db):
@@ -62,7 +69,9 @@ class TestSearchRecentNews:
 
 
 class TestCrawlFreshNews:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_crawl_filters_by_keyword(self):
         mock_items = [
             NewsItem(source="test", title="Fed rate cut signals", url="", content_snippet="test", title_hash="h1"),
@@ -75,6 +84,7 @@ class TestCrawlFreshNews:
             assert any("rate cut" in r["title"].lower() for r in results)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_crawl_case_insensitive(self):
         mock_items = [
             NewsItem(source="test", title="FED RATE CUT SIGNALS", url="", content_snippet="test", title_hash="h1"),

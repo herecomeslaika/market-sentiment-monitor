@@ -17,6 +17,7 @@ def setup_deps():
 
 
 class TestParseRelations:
+    @pytest.mark.unit
     def test_valid_json(self):
         from app.analysis.knowledge_graph import _parse_relations
         text = '[{"source": "央行降息", "target": "银行利润", "relation": "affects", "context": "降息压缩利差", "confidence": 0.8}]'
@@ -27,24 +28,28 @@ class TestParseRelations:
         assert result[0].relation == "affects"
         assert result[0].confidence == 0.8
 
+    @pytest.mark.unit
     def test_invalid_relation_type_skipped(self):
         from app.analysis.knowledge_graph import _parse_relations
         text = '[{"source": "A", "target": "B", "relation": "invalid_type", "context": "", "confidence": 0.5}]'
         result = _parse_relations(text)
         assert len(result) == 0
 
+    @pytest.mark.unit
     def test_clamps_confidence(self):
         from app.analysis.knowledge_graph import _parse_relations
         text = '[{"source": "A", "target": "B", "relation": "causes", "context": "", "confidence": 2.0}]'
         result = _parse_relations(text)
         assert result[0].confidence == 1.0
 
+    @pytest.mark.unit
     def test_markdown_wrapped(self):
         from app.analysis.knowledge_graph import _parse_relations
         text = '```json\n[{"source": "A股", "target": "港股", "relation": "correlates", "context": "联动", "confidence": 0.6}]\n```'
         result = _parse_relations(text)
         assert len(result) == 1
 
+    @pytest.mark.unit
     def test_invalid_json(self):
         from app.analysis.knowledge_graph import _parse_relations
         result = _parse_relations("bad json")
@@ -52,6 +57,7 @@ class TestParseRelations:
 
 
 class TestParseCausalChain:
+    @pytest.mark.unit
     def test_valid_json(self):
         from app.analysis.knowledge_graph import _parse_causal_chain
         text = '{"trigger": "央行降息", "path": ["央行降息", "银行利差收窄", "房贷需求上升"], "impact": "房地产利好", "confidence": 0.75}'
@@ -62,12 +68,14 @@ class TestParseCausalChain:
         assert result.impact == "房地产利好"
         assert result.confidence == 0.75
 
+    @pytest.mark.unit
     def test_empty_path_rejected(self):
         from app.analysis.knowledge_graph import _parse_causal_chain
         text = '{"trigger": "test", "path": [], "impact": "none", "confidence": 0.5}'
         result = _parse_causal_chain(text)
         assert result is None
 
+    @pytest.mark.unit
     def test_invalid_json(self):
         from app.analysis.knowledge_graph import _parse_causal_chain
         result = _parse_causal_chain("not json")
@@ -75,7 +83,9 @@ class TestParseCausalChain:
 
 
 class TestExtractRelations:
+    @pytest.mark.unit
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_extract_with_mock(self):
         from app.analysis.knowledge_graph import extract_relations
 
@@ -89,6 +99,7 @@ class TestExtractRelations:
             assert relations[0].source == "央行"
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_skips_single_entity(self):
         from app.analysis.knowledge_graph import extract_relations
         entities = [Entity(name="央行", type="policy")]
@@ -96,6 +107,7 @@ class TestExtractRelations:
         assert relations == []
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_handles_failure(self):
         from app.analysis.knowledge_graph import extract_relations
 
@@ -109,7 +121,9 @@ class TestExtractRelations:
 
 
 class TestInferCausalChain:
+    @pytest.mark.unit
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_infer_with_mock(self):
         from app.analysis.knowledge_graph import infer_causal_chain
 
@@ -125,6 +139,7 @@ class TestInferCausalChain:
             assert len(chain.path) == 3
 
     @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_returns_none_without_relations(self):
         from app.analysis.knowledge_graph import infer_causal_chain
         entities = [Entity(name="A", type="company")]

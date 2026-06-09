@@ -6,7 +6,9 @@ from app.models import Entity
 
 
 class TestExtractAndSave:
+    @pytest.mark.integration
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_parses_valid_json(self, db):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '[{"name":"工商银行","type":"company","aliases":["ICBC"]},{"name":"降息","type":"policy","aliases":[]}]'
@@ -22,6 +24,7 @@ class TestExtractAndSave:
             assert result[0].type == "company"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_handles_malformed_json(self, db):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = "这不是JSON"
@@ -34,6 +37,7 @@ class TestExtractAndSave:
             assert result == []
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_handles_timeout(self, db):
         mock_client = AsyncMock()
         mock_client.analyze.side_effect = TimeoutError()
@@ -46,6 +50,7 @@ class TestExtractAndSave:
             assert result == []
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_skips_empty_name(self, db):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '[{"name":"","type":"policy"},{"name":"有效实体","type":"company"}]'
@@ -58,6 +63,7 @@ class TestExtractAndSave:
             assert all(e.name.strip() for e in result)
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_extract_handles_markdown_wrapped_json(self, db):
         mock_client = AsyncMock()
         mock_client.analyze.return_value = '```json\n[{"name":"央行","type":"policy"}]\n```'

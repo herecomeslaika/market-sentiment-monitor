@@ -19,25 +19,30 @@ def _make_alert(level: str = "warning") -> AlertPayload:
 
 
 class TestShouldSendAlert:
+    @pytest.mark.unit
     def setup_method(self):
         _notification_prefs.clear()
 
+    @pytest.mark.unit
     def test_no_prefs_allows_all(self):
         alert = _make_alert()
         assert should_send_alert(alert, "u1") is True
 
+    @pytest.mark.unit
     def test_silence_period_blocks_warning(self):
         set_notification_prefs("u1", {"silence_minutes": 30})
         mark_alert_sent("u1")
         alert = _make_alert("warning")
         assert should_send_alert(alert, "u1") is False
 
+    @pytest.mark.unit
     def test_critical_bypasses_silence(self):
         set_notification_prefs("u1", {"silence_minutes": 30})
         mark_alert_sent("u1")
         alert = _make_alert("critical")
         assert should_send_alert(alert, "u1") is True
 
+    @pytest.mark.unit
     def test_min_level_filter(self):
         set_notification_prefs("u1", {"min_level": "warning", "silence_minutes": 0})
         info_alert = _make_alert("info")
@@ -45,6 +50,7 @@ class TestShouldSendAlert:
         warning_alert = _make_alert("warning")
         assert should_send_alert(warning_alert, "u1") is True
 
+    @pytest.mark.unit
     def test_min_level_critical(self):
         set_notification_prefs("u1", {"min_level": "critical", "silence_minutes": 0})
         warning_alert = _make_alert("warning")
@@ -54,21 +60,26 @@ class TestShouldSendAlert:
 
 
 class TestIsInSilencePeriod:
+    @pytest.mark.unit
     def setup_method(self):
         _notification_prefs.clear()
 
+    @pytest.mark.unit
     def test_no_prefs_not_in_silence(self):
         assert is_in_silence_period("u1") is False
 
+    @pytest.mark.unit
     def test_no_last_sent_not_in_silence(self):
         set_notification_prefs("u1", {"silence_minutes": 30})
         assert is_in_silence_period("u1") is False
 
+    @pytest.mark.unit
     def test_after_mark_in_silence(self):
         set_notification_prefs("u1", {"silence_minutes": 30})
         mark_alert_sent("u1")
         assert is_in_silence_period("u1") is True
 
+    @pytest.mark.unit
     def test_zero_silence_not_in_silence(self):
         set_notification_prefs("u1", {"silence_minutes": 0})
         mark_alert_sent("u1")
@@ -76,14 +87,17 @@ class TestIsInSilencePeriod:
 
 
 class TestSetNotificationPrefs:
+    @pytest.mark.unit
     def setup_method(self):
         _notification_prefs.clear()
 
+    @pytest.mark.unit
     def test_set_prefs(self):
         set_notification_prefs("u1", {"silence_minutes": 10, "min_level": "info"})
         assert _notification_prefs["u1"]["silence_minutes"] == 10
         assert _notification_prefs["u1"]["min_level"] == "info"
 
+    @pytest.mark.unit
     def test_overwrite_prefs(self):
         set_notification_prefs("u1", {"silence_minutes": 10})
         set_notification_prefs("u1", {"silence_minutes": 60})
