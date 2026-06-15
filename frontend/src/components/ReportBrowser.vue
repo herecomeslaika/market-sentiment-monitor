@@ -259,10 +259,13 @@ async function generateReport() {
       deep_analysis: data.deep_analysis,
       news_title: data.news_title,
       news_source: data.news_source,
+      news_url: data.news_url,
+      news_snippet: data.news_snippet,
+      sentiment_score: data.sentiment_score ?? 0,
+      sentiment_label: data.sentiment_label ?? 'neutral',
+      sentiment_confidence: data.sentiment_confidence ?? 0,
+      referenced_news: data.referenced_news || [],
       created_at: data.created_at,
-      sentiment_score: 0,
-      sentiment_label: 'neutral',
-      sentiment_confidence: 0,
     }
     intentText.value = ''
   } catch (e) {

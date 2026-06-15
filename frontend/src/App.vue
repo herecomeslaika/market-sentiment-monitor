@@ -138,21 +138,18 @@ const mergedNews = computed(() => {
 })
 
 async function fetchData() {
-  try {
-    const [newsRes, sentRes, trendRes, kwRes] = await Promise.all([
-      fetch('/news/history?limit=50').then(r => r.json()),
-      fetch('/sentiment/history?hours=24').then(r => r.json()),
-      fetch('/sentiment/trend?hours=72').then(r => r.json()),
-      fetch('/stats/keywords').then(r => r.json()),
-    ])
-    if (Array.isArray(newsRes)) news.value = newsRes
-    if (Array.isArray(sentRes)) sentiments.value = sentRes
-    if (Array.isArray(trendRes.trend)) trend.value = trendRes.trend
-    if (Array.isArray(trendRes.momentum_shifts)) momentumShifts.value = trendRes.momentum_shifts
-    if (Array.isArray(kwRes)) keywords.value = kwRes
-  } catch (e) {
-    console.error('Failed to fetch data:', e)
-  }
+  const safeFetch = (url) => fetch(url).then(r => r.ok ? r.json() : null).catch(() => null)
+  const [newsRes, sentRes, trendRes, kwRes] = await Promise.all([
+    safeFetch('/news/history?limit=50'),
+    safeFetch('/sentiment/history?hours=24'),
+    safeFetch('/sentiment/trend?hours=168'),
+    safeFetch('/stats/keywords'),
+  ])
+  if (Array.isArray(newsRes)) news.value = newsRes
+  if (Array.isArray(sentRes)) sentiments.value = sentRes
+  if (trendRes?.trend) trend.value = trendRes.trend
+  if (Array.isArray(trendRes?.momentum_shifts)) momentumShifts.value = trendRes.momentum_shifts
+  if (Array.isArray(kwRes)) keywords.value = kwRes
 }
 
 function connectWS() {

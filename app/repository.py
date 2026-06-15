@@ -93,7 +93,7 @@ async def query_sentiment_history(hours: int = 24):
     rows = await db.execute_fetchall(
         """SELECT s.score, s.label, s.confidence, s.processed_at, n.title, n.source
            FROM sentiment s JOIN news n ON s.news_id = n.id
-           WHERE s.processed_at >= datetime('now', ?)
+           WHERE s.processed_at >= datetime('now', 'localtime', ?)
            ORDER BY s.processed_at DESC""",
         (f"-{hours} hours",),
     )
@@ -138,7 +138,7 @@ async def query_sentiment_trend(hours: int = 24):
              SUM(CASE WHEN score < -0.3 THEN 1 ELSE 0 END) as neg_count,
              SUM(CASE WHEN score BETWEEN -0.3 AND 0.3 THEN 1 ELSE 0 END) as neutral_count
            FROM sentiment
-           WHERE processed_at >= datetime('now', ?)
+           WHERE processed_at >= datetime('now', 'localtime', ?)
            GROUP BY time_bucket
            ORDER BY time_bucket""",
         (f"-{hours} hours",),
@@ -156,7 +156,7 @@ async def query_sentiment_trend(hours: int = 24):
            FROM multi_sentiment ms
            JOIN news n ON n.id = ms.news_id
            WHERE ms.momentum_shift = 1
-           AND ms.processed_at >= datetime('now', ?)
+           AND ms.processed_at >= datetime('now', 'localtime', ?)
            ORDER BY ms.processed_at""",
         (f"-{hours} hours",),
     )
@@ -170,7 +170,7 @@ async def query_keyword_stats(hours: int = 24):
     rows = await db.execute_fetchall(
         """SELECT triggered_keywords, alert_level, COUNT(*) as count
            FROM alerts
-           WHERE created_at >= datetime('now', ?)
+           WHERE created_at >= datetime('now', 'localtime', ?)
            GROUP BY triggered_keywords, alert_level
            ORDER BY count DESC
            LIMIT 20""",
@@ -191,13 +191,13 @@ async def cleanup_old_data(days: int = 30):
     db = await get_db()
     cutoff = f"-{days} days"
     await db.execute(
-        "DELETE FROM alerts WHERE created_at < datetime('now', ?)", (cutoff,)
+        "DELETE FROM alerts WHERE created_at < datetime('now', 'localtime', ?)", (cutoff,)
     )
     await db.execute(
-        "DELETE FROM sentiment WHERE processed_at < datetime('now', ?)", (cutoff,)
+        "DELETE FROM sentiment WHERE processed_at < datetime('now', 'localtime', ?)", (cutoff,)
     )
     await db.execute(
-        "DELETE FROM news WHERE created_at < datetime('now', ?)", (cutoff,)
+        "DELETE FROM news WHERE created_at < datetime('now', 'localtime', ?)", (cutoff,)
     )
     await db.commit()
     logger.info("Cleaned up data older than %d days", days)
@@ -301,6 +301,10 @@ async def query_reports(limit: int = 20, offset: int = 0, level: str | None = No
             r["triggered_keywords"] = json.loads(r["triggered_keywords"])
         except (json.JSONDecodeError, TypeError):
             r["triggered_keywords"] = []
+        try:
+            r["referenced_news"] = json.loads(r.get("referenced_news", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            r["referenced_news"] = []
         results.append(r)
     return results
 
@@ -415,7 +419,7 @@ async def query_entity_timeline(entity_name: str, hours: int = 168) -> list[dict
            JOIN entities e ON e.id = ne.entity_id
            LEFT JOIN sentiment s ON s.news_id = n.id
            WHERE (e.name = ? OR e.aliases LIKE ?)
-           AND n.created_at >= datetime('now', ?)
+           AND n.created_at >= datetime('now', 'localtime', ?)
            ORDER BY n.created_at DESC""",
         (entity_name, f'%"{entity_name}"%', f"-{hours} hours"),
     )
@@ -449,7 +453,7 @@ async def load_recent_clusters(hours: int = 48) -> list:
     db = await get_db()
     rows = await db.execute_fetchall(
         """SELECT * FROM event_clusters
-           WHERE last_seen >= datetime('now', ?)
+           WHERE last_seen >= datetime('now', 'localtime', ?)
            ORDER BY significance DESC""",
         (f"-{hours} hours",),
     )
@@ -586,7 +590,7 @@ async def query_multi_sentiment_history(hours: int = 24, limit: int = 50) -> lis
         """SELECT ms.*, n.title, n.source
            FROM multi_sentiment ms
            JOIN news n ON n.id = ms.news_id
-           WHERE ms.processed_at >= datetime('now', ?)
+           WHERE ms.processed_at >= datetime('now', 'localtime', ?)
            ORDER BY ms.processed_at DESC LIMIT ?""",
         (f"-{hours} hours", limit),
     )
@@ -600,7 +604,7 @@ async def query_momentum_shifts(hours: int = 24, limit: int = 20) -> list[dict]:
            FROM multi_sentiment ms
            JOIN news n ON n.id = ms.news_id
            WHERE ms.momentum_shift = 1
-           AND ms.processed_at >= datetime('now', ?)
+           AND ms.processed_at >= datetime('now', 'localtime', ?)
            ORDER BY ms.processed_at DESC LIMIT ?""",
         (f"-{hours} hours", limit),
     )
@@ -614,7 +618,7 @@ async def query_entity_multi_sentiment(entity_name: str, hours: int = 168) -> li
            FROM multi_sentiment ms
            JOIN news n ON n.id = ms.news_id
            WHERE ms.entity_name = ?
-           AND ms.processed_at >= datetime('now', ?)
+           AND ms.processed_at >= datetime('now', 'localtime', ?)
            ORDER BY ms.processed_at DESC""",
         (entity_name, f"-{hours} hours"),
     )
@@ -695,7 +699,7 @@ async def load_latest_fed_policy(max_age_hours: int = 1) -> dict | None:
     db = await get_db()
     rows = await db.execute_fetchall(
         """SELECT * FROM fed_policy_summary
-           WHERE created_at >= datetime('now', ?)
+           WHERE created_at >= datetime('now', 'localtime', ?)
            ORDER BY created_at DESC LIMIT 1""",
         (f"-{max_age_hours} hours",),
     )

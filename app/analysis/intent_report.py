@@ -292,6 +292,11 @@ async def run(intent: str, hours: int = 168) -> dict | None:
         "alert_level": "info",
         "news_title": intent,
         "news_source": "on-demand",
+        "news_url": primary.get("url", ""),
+        "news_snippet": primary.get("content_snippet", ""),
+        "sentiment_score": primary.get("score", 0.0) or 0.0,
+        "sentiment_label": primary.get("label", "neutral") or "neutral",
+        "sentiment_confidence": primary.get("confidence", 0.0) or 0.0,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "referenced_news": referenced_news,
     }
